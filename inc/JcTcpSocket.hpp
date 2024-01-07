@@ -5,11 +5,17 @@
 #include <sys/socket.h>
 #include <netinet/in.h>  // sockaddr_in
 #include <arpa/inet.h>   // htons, inet_addr
+#include <stdexcept>     // invalid_argument
+#include <algorithm>     // std::copy
 #include <cstdint>
-#include <cstring>  // std::memset
+#include <cstring>       // std::memset
 #include <string>
+#include <thread>
 #include <mutex>
 #include "JcTcpSocketBackend.hpp"
+
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE -1
 
 namespace JC {
   struct Window {
@@ -69,8 +75,8 @@ namespace JC {
     std::mutex read_mutex;
     std::condition_variable wait_cond;
 
-    uint8_t* sending_buf;
-    int sending_len;
+    std::vector<uint8_t> sending_buf;
+    // int sending_len;
     std::mutex write_mutex;  // synch app and JC-TCP backend
 
     int dying;
