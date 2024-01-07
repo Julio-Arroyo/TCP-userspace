@@ -1,9 +1,15 @@
 #ifndef JC_TCP_SOCKET_HPP
 #define JC_TCP_SOCKET_HPP
 
-#include <cstdint>
-#include <mutex>
 #include <condition_variable>
+#include <sys/socket.h>
+#include <netinet/in.h>  // sockaddr_in
+#include <arpa/inet.h>   // htons, inet_addr
+#include <cstdint>
+#include <cstring>  // std::memset
+#include <string>
+#include <mutex>
+#include "JcTcpSocketBackend.hpp"
 
 namespace JC {
   struct Window {
@@ -26,16 +32,37 @@ namespace JC {
   public:
     TcpSocket();
 
-    void start();
+    /**
+     * @brief Constructs a JC-TCP socket
+     *
+     * The functionality depends on 'socket_type'.
+     *   - INITIATOR: 'server_ip' and 'port' constitute the
+     *                address being connected to. This socket
+     *                will be bound to a random usable free port
+     *                with INADDR_ANY.
+     *   - LISTENER: 'server_ip' and 'port' constitute the
+     *               address this socket is bound to.
+     */
+    void open(const JC::SocketType socket_type,
+              const int port,
+              const std::string& server_ip);
+
     int read();
     int write();
     int close();
 
   private:
-    int socket;
+    std::thread backendThread;
+
+    int udpSocket;
     uint16_t my_port;
-    sockaddr_in conn;
     JC::SocketType type;
+
+    /* If 'type' is TCP_INITIATOR, 'conn' is the (ip, port) this socket
+     * is connected to.
+     * If it is TCP_LISTENER, 'conn' is the (ip, port) this socket is
+     * bound to */
+    sockaddr_in conn;  
 
     uint8_t* received_buf;
     int received_len;
