@@ -100,42 +100,36 @@ namespace JC {
    *   - Used when sending one packet, wait for receipt of ACK
    */
   void TcpSocket::receiveIncomingData(const JC::ReadMode readMode) {
-    int minBytesAvl = 0;
-    JC::TcpHeader recvdHdr;
-    socklen_t conn_len = sizeof(conn);
+    if (readMode == JC::ReadMode::BLOCK) {
+      std::cerr << "Backend should not block indefinitely to receive data." << std::endl;
+      return;
+    }
 
-    // peek to see how much data there is to receive
-    switch (readMode) {
-      case JC::ReadMode::TIMEOUT: { 
+    int minBytesAvl = 0;
+
+    // optionally wait some time in case no data has been received yet
+    if (readMode == JC::ReadMode::TIMEOUT) {
         // wait to see if data comes in
         struct pollfd pfd;
         pfd.fd = udpSocket;
         pfd.events = POLLIN;  // there is data to read
         poll(&pfd, 1 /* num pollfd's */, ACK_TIMEOUT /* ms */);
-        [[fallthrough]];
-      }
-      case JC::ReadMode::NO_WAIT: {
-        // find out the minimum number of bytes available to receive
+    } else {
+      assert(readMode == JC::ReadMode::NO_WAIT);
+    }
 
-        int flags = MSG_DONTWAIT |  // make nonblocking call
-                    MSG_PEEK;       /* read data w/o removing (next recvfrom() 
-                                       call returns same data) */
-        minBytesAvl = recvfrom(udpSocket,
+    // peek to see if there's at least a header's worth of data
+    JC::TcpHeader recvdHdr;
+    socklen_t conn_len = sizeof(conn);
+    int flags = MSG_DONTWAIT |  /* make nonblocking call */
+                MSG_PEEK;       /* next recvfrom() call returns same data) */
+    int minBytesAvl = recvfrom(udpSocket,
                                (void*) &recvdHdr,   /* buf */
                                sizeof(JC::TcpHeader),  /* len */
                                flags,
                                (sockaddr*) conn,       /* src_addr */
                                &conn_len);             /* addrlen */
-        break;
-      }
-      case JC::ReadMode::BLOCK: {
-        // should not block on tight loop
-        assert(false);
-        break;
-      }
-    }
 
-    // TODO
     if (minBytesAvl >= sizeof(JC::TcpHeader)) {  // >= 1 pkt worth of data
       // extract the entire packet (header + payload) from socket
       size_t nBytesRecvd{0};
@@ -150,6 +144,7 @@ namespace JC {
                                 (sockaddr*) conn,
                                 &conn_len);
       }
+      assert(recvdPacket.size() == recvdHdr.packetLen);
 
       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
         assert(sendState.ackNum <= recvdHdr.ackNum);
@@ -159,16 +154,17 @@ namespace JC {
         return;
       }
 
-      /*
-      // TODO copy payload into received_buf
-      std::lock_guard<std::mutex> read_lock_guard{read_mutex}; // TODO change to unique_lock
-      size_t curr_recv_size = received_buf.size();
-      received_buf.resize(curr_recv_size + payload_len);
-      std::copy(payload.begin(),
-                payload.begin() + payload_len,
-                received_buf.begin() + curr_recv_size);
-      // TODO signal wait_cond
-      */
+      std::unique_lock<std::mutex> cv_lock{read_mutex};  // needed by condvar
+      cv_lock.lock();
+
+      size_t curr_recvd_size = received_buf.size();
+      received_buf.resize(curr_recvd_size + nBytesRecvd);
+      std::copy(recvdPacket.begin(),
+                recvdPacket.end(),
+                received_buf.begin() + curr_recvd_size);
+      wait_cond.notify_all();
+
+      cv_lock.unlock();
     }
   }
 }

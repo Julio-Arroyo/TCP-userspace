@@ -119,6 +119,9 @@ namespace JC {
      *
      * Called after sending when waiting for ACK  // TODO fix stop-wait
      * Called in backend tight loop
+     *
+     * @param readMode Dictates whether this call should set a timer to
+     *                 wait for data, or try to read immediately.
      */
     void receiveIncomingData(const JC::ReadMode readMode);
 

@@ -1,0 +1,9 @@
+#ifndef JC_TCP_CONFIG_HPP
+#define JC_TCP_CONFIG_HPP
+
+#define MAX_PACKET_LEN 1400
+
+#define ACK_TIMEOUT 3000
+
+#endif  // JC_TCP_CONFIG_HPP
+
