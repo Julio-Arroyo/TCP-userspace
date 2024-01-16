@@ -6,8 +6,10 @@ namespace JC {
    *   - Tear down if 'dying' has been set and there is no 
    *     pending data to send.
    *   - Whenever there is data in 'sending_buf', empty it and put the data
-   *     in individual packets and send them over the network one at a time.
-   *   - Constantly check if there is incoming data, if there is TODO
+   *     in individual packets and send them over the socket one at a time.
+   *   - RECEIVING END: check if there is incoming data, which may be an ACK or an actual packet
+   *     with payload. If it's the former, update sendState. If it is the latter
+   *     save the received the 
    */
   void TcpSocket::beginBackend() {
     for (;;) {
@@ -52,28 +54,28 @@ namespace JC {
       size_t remaining_bytes = len - bytes_sent;
       size_t payload_size = std::min(remaining_bytes, MaxPayloadSize);
 
-      // prepare packet (header and payload)
+      // *** prepare packet (header and payload) ***
       size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
-      void* packet = new uint8_t[packet_len];  // TODO use array?
-      JC::TcpHeader* hdr = (JC::TcpHeader*) packet;
-      initHeader(hdr,
-                 my_port,                // srcPort
+      std::vector<uint8_t> packet(packet_len);
+      initHeader(static_cast<JC::TcpHeader*>(packet.data()),
+                 myPort,                 // srcPort
                  ntohs(conn->sin_port),  // destPort
                  sendState.lastAck,      // seqNum
                  UNUSED,                 // ackNum
                  sizeof(JC::TcpHeader),  // header_len
                  packet_len,
-                 UNUSED,                 // TODO flags
+                 UNUSED,                 // flags
                  1,                      // advertised_window
                  UNUSED);                // extensionLen;
+      // prepare payload
       std::copy(dataToSend.begin() + bytes_sent,
                 dataToSend.begin() + bytes_sent + payload_size,
-                packet + sizeof(JC::TcpHeader) + bytes_sent);
+                packet.data() + sizeof(JC::TcpHeader) + bytes_sent);
 
       for (;;) {
         // send one packet
         sendto(udpSocket,         // sockfd
-               (void*) packet,    // buf
+               static_cast<void*>(packet.data()),    // buf
                packet_len,        // len
                0,                 // flags
                (sockaddr*) conn,  // dest_addr
@@ -83,12 +85,11 @@ namespace JC {
         TcpSocket::receiveIncomingData(ReadMode::TIMEOUT);
 
         if (sendState.lastAck == sendState.lastSent) {
-          // packet has been acked, send next 
+          // packet has been ACKed, send next 
           break;
         }
       }
 
-      delete[] packet;
       bytes_sent += payload_size;
     }
   }
@@ -155,13 +156,20 @@ namespace JC {
       }
 
       // Write the received payload into receivedBuf
-      std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
-      size_t curr_recvd_size = receivedBuf.size();
-      receivedBuf.resize(curr_recvd_size + nBytesRecvd);
-      std::copy(recvdPacket.begin() + recvdPacket.headerLen,  // start at payload
-                recvdPacket.end(),
-                receivedBuf.begin() + curr_recvd_size);  // after any data already in buffer
+      {
+        std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
+        size_t curr_recvd_size = receivedBuf.size();
+        receivedBuf.resize(curr_recvd_size + nBytesRecvd);
+        std::copy(recvdPacket.begin() + recvdPacket.headerLen,  // start at payload
+                  recvdPacket.end(),
+                  receivedBuf.begin() + curr_recvd_size);  // after any data already in buffer
+      }
       receivedCondVar.notify_all();
+
+      // REPLY with ACK
+      JC::TcpHeader ackHeader;
+      initHeader(&ackHeader,
+                 myPort)
     }
   }
 }
