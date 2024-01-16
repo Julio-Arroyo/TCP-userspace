@@ -20,7 +20,7 @@ namespace JC {
                         0);         // protocol
     if (sockfd == -1) {
       assert(false);
-      return EXIT_FAILURE;
+      return  JC_EXIT_FAILURE;
     }
     udpSocket = sockfd;
 
@@ -40,7 +40,7 @@ namespace JC {
                    sizeof(optval));
         if (-1 == bind(udpSocket, (sockaddr*) &conn_, sizeof(conn_))) {
           assert(false);
-          return EXIT_FAILURE;
+          return JC_EXIT_FAILURE;
         }
         conn = conn_;
         break;
@@ -50,7 +50,7 @@ namespace JC {
         // connect to (server_ip, port)
         if (server_ip == "") {
           throw std::invalid_argument("Cannot initiate connection with empty address '""'");
-          return EXIT_FAILURE;
+          return JC_EXIT_FAILURE;
         }
 
         conn_.sin_family = AF_INET;
@@ -62,7 +62,7 @@ namespace JC {
         my_addr.sin_addr.saddr = htonl(INADDR_ANY);
         if (-1 == bind(udpSocket, (sockaddr*) &my_addr, sizeof(my_addr))) {
           assert(false);
-          return EXIT_FAILURE;
+          return JC_EXIT_FAILURE;
         }
         conn = conn_;
         break;                                       
@@ -82,36 +82,76 @@ namespace JC {
     window.next_seq_expected = 0;
     window.last_ack_received = 0;
 
-    backendThread = std::thread(begin_backend, this);
+    backendThread = std::thread(&TcpSocket::beginBackend, this);
 
-    return EXIT_SUCCESS;
+    return JC_EXIT_SUCCESS;
   }
 
-  int TcpSocket::read(void* dest_buf, const int len, const JC::ReadMode read_mode) {
+  int TcpSocket::read(void* dest_buf,
+                      const int len,
+                      const JC::ReadMode read_mode) {
+    std::lock_guard<std::mutex> read_lock_guard{read_mutex};
+
+    switch (readMode) {
+      case JC::ReadMode::TIMEOUT: {
+        // NOT IMPLEMENTED BY JC-TCP
+        assert(false);
+        break;
+      }
+      case JC::ReadMode::BLOCK: {
+        // wait on wait_cond
+
+        // fallthrough...
+      }
+      case JC::ReadMode::NO_WAIT: {
+        if (received_buf.size() == 0) {
+          return 0;
+        }
+
+        size_t readLen = std::min(len, received_buf.size());
+        uint8_t* dest_buf_bytes = static_cast<uint8_t*>(dest_buf);
+        std::copy(received_buf.begin(),
+                  received_buf.begin() + readLen,
+                  dest_buf_bytes);
+
+        // delete first readLen bytes from received_buf
+
+        return readLen;
+      }
+    }
     return 0;
   }
 
+  /**
+   * Writes data to the JC-TCP socket.
+   *
+   * From an implementation perspective, the data in src_buf is copied
+   * into sending_buf. The Backend is then responsible for emptying it
+   * and actually sending the data over the network.
+   */
   int TcpSocket::write(void* src_buf, const int write_len) {
     if (write_len < 0) {
       std::cerr << "Cannot write '" << write_len << "' bytes. 'write_len' must must be non-negative." << std::endl; 
-      return EXIT_FAILURE;
+      return JC_EXIT_FAILURE;
     }
 
     std::lock_guard<std::mutex> write_lock_guard{write_mutex};
 
-    // copy data in 'src_buf' into 'sending_buf'
+    // copy data from 'src_buf' into 'sending_buf'
     int curr_sending_size = sending_buf.size();
-    sending_buf.resize(curr_sending_size + write_len);  // ensure enough space for new 'write_len' bytes
+    sending_buf.resize(curr_sending_size + write_len);  // add space for new 'write_len' bytes
     uint8_t* src_buf_bytes = static_cast<uint8_t*>(src_buf);
     std::copy(src_buf_bytes,
               src_buf_bytes + write_len,
               sending_buf.begin() + curr_sending_size);
 
-    return EXIT_SUCCESS;
+    return JC_EXIT_SUCCESS;
   }
 
   int TcpSocket::close() {
-    return EXIT_FAILURE;
+    std::lock_guard<std::mutex> close_lock_guard{close_mutex};
+    dying = true;
+    return JC_EXIT_SUCCESS;
   }
 }
 

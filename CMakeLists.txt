@@ -4,5 +4,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_COMPILER "g++-13")
 
 project(JcTcp)
-add_executable(JcTcp Test.cpp)
+
+set(TARGET test)
+add_executable(${TARGET} src/Test.cpp)
+target_include_directories(${TARGET} PRIVATE "./inc")
 

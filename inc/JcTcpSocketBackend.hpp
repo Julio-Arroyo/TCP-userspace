@@ -2,7 +2,7 @@
 #define JC_TCP_SOCKET_BACKEND_HPP
 
 /**
- * Launches the JC-TCP socket backend.
+ * @brief Launches the JC-TCP socket backend.
  *
  * @param in The socket to be used for processing.
  */
