@@ -128,7 +128,7 @@ namespace JC {
     std::thread backendThread;
 
     int udpSocket;
-    uint16_t my_port;
+    uint16_t myPort;
     JC::SocketType type;
 
     /* If 'type' is TCP_INITIATOR, 'conn' is the (ip, port) this socket

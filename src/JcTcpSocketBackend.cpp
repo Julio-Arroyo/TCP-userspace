@@ -140,7 +140,7 @@ namespace JC {
       while (nBytesRecvd < recvdHdr.packetLen) {
         nBytesRecvd += recvfrom(udpSocket,
                                 static_cast<void*>(recvdPacket.data() + nBytesRecvd),
-                                payload_len - nBytesRecvd,
+                                recvdHdr.packetLen - nBytesRecvd,
                                 UNUSED,  // flags
                                 (sockaddr*) conn,
                                 &conn_len);
@@ -167,9 +167,24 @@ namespace JC {
       receivedCondVar.notify_all();
 
       // REPLY with ACK
+      size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
       JC::TcpHeader ackHeader;
       initHeader(&ackHeader,
-                 myPort)
+                 myPort,                         // srcPort
+                 ntohs(conn.sin_port),           // destPort
+                 UNUSED,                         // seqNum
+                 recvdHdr.seqNum + payload_len,  // ackNum
+                 sizeof(JC::TcpHeader),          // headerLen
+                 sizeof(JC::TcpHeader),          // packetLen
+                 JC_TCP_ACK_FLAG,
+                 UNUSED,                         // advertisedWindow
+                 UNUSED);                        // extensionLen
+      sendto(udpSocket,         // sockfd
+             static_cast<void*>(&ackHeader), // buf
+             sizeof(JC::TcpHeader),        // len
+             0,                 // flags
+             (sockaddr*) conn,  // dest_addr
+             sizeof(conn));     // addrlen
     }
   }
 }

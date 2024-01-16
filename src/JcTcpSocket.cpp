@@ -72,16 +72,6 @@ namespace JC {
     getsockname(udpSocket, (sockaddr*) &my_addr, &my_addr_sz);
     my_port = ntohs(my_addr.sin_port);
 
-    /* TODO remove
-    received_buf = NULL;
-    received_len = 0;
-
-    sending_buf = NULL;
-    sending_len = 0;
-    */
-
-    // dying = 0;
-
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
     return JC_EXIT_SUCCESS;
