@@ -115,7 +115,7 @@ namespace JC {
 
     /**
      * Checks udpSocket for any incoming data. If it sees anything,
-     * it puts it into received_buf.
+     * it puts it into receivedBuf.
      *
      * Called after sending when waiting for ACK  // TODO fix stop-wait
      * Called in backend tight loop
@@ -138,12 +138,12 @@ namespace JC {
     sockaddr_in conn;  
 
     /* Backend constantly checks udpSocket for incoming data, and puts
-     * anything it received into received_buf. read() then directly
-     * retrieves data from received_buf */
-    std::vector<uint8_t> received_buf;
+     * anything it received into receivedBuf. read() then directly
+     * retrieves data from receivedBuf */
+    std::vector<uint8_t> receivedBuf;
     // int received_len;
-    std::mutex read_mutex;
-    std::condition_variable wait_cond;
+    std::mutex receivedMutex;
+    std::condition_variable receivedCondVar;
 
     /* write() puts data into sending_buf, backend empties it and
      * sends it via the udpSocket */
@@ -155,8 +155,8 @@ namespace JC {
     bool dying{false};  
     std::mutex close_mutex;
 
-    JC::SendState sendState;
-    JC::RecvState recvState;
+    JC::SendState sendState{0, 0, 0};
+    JC::RecvState recvState{0, 0, 0};
   };
 }
 

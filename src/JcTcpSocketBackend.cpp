@@ -154,17 +154,14 @@ namespace JC {
         return;
       }
 
-      std::unique_lock<std::mutex> cv_lock{read_mutex};  // needed by condvar
-      cv_lock.lock();
-
-      size_t curr_recvd_size = received_buf.size();
-      received_buf.resize(curr_recvd_size + nBytesRecvd);
-      std::copy(recvdPacket.begin(),
+      // Write the received payload into receivedBuf
+      std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
+      size_t curr_recvd_size = receivedBuf.size();
+      receivedBuf.resize(curr_recvd_size + nBytesRecvd);
+      std::copy(recvdPacket.begin() + recvdPacket.headerLen,  // start at payload
                 recvdPacket.end(),
-                received_buf.begin() + curr_recvd_size);
-      wait_cond.notify_all();
-
-      cv_lock.unlock();
+                receivedBuf.begin() + curr_recvd_size);  // after any data already in buffer
+      receivedCondVar.notify_all();
     }
   }
 }

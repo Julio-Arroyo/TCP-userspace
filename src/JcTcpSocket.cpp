@@ -72,15 +72,15 @@ namespace JC {
     getsockname(udpSocket, (sockaddr*) &my_addr, &my_addr_sz);
     my_port = ntohs(my_addr.sin_port);
 
+    /* TODO remove
     received_buf = NULL;
     received_len = 0;
 
     sending_buf = NULL;
     sending_len = 0;
+    */
 
-    dying = 0;
-    window.next_seq_expected = 0;
-    window.last_ack_received = 0;
+    // dying = 0;
 
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
@@ -90,36 +90,29 @@ namespace JC {
   int TcpSocket::read(void* dest_buf,
                       const int len,
                       const JC::ReadMode read_mode) {
-    std::lock_guard<std::mutex> read_lock_guard{read_mutex};
+    if (read_mode == JC::ReadMode::TIMEOUT) {
+      std::cerr << "jc_read does not implement read_mode=TIMEOUT" << std::endl;
+      return JC_EXIT_FAILURE;
+    }
 
-    switch (readMode) {
-      case JC::ReadMode::TIMEOUT: {
-        // NOT IMPLEMENTED BY JC-TCP
-        assert(false);
-        break;
-      }
-      case JC::ReadMode::BLOCK: {
-        // wait on wait_cond
+    std::unique_lock<std::mutex> read_unique_lock{readMutex};  // acquire lock
 
-        // fallthrough...
-      }
-      case JC::ReadMode::NO_WAIT: {
-        if (received_buf.size() == 0) {
-          return 0;
-        }
-
-        size_t readLen = std::min(len, received_buf.size());
-        uint8_t* dest_buf_bytes = static_cast<uint8_t*>(dest_buf);
-        std::copy(received_buf.begin(),
-                  received_buf.begin() + readLen,
-                  dest_buf_bytes);
-
-        // delete first readLen bytes from received_buf
-
-        return readLen;
+    if (read_mode == JC::ReadMode::BLOCK) {
+      if (receivedBuf.empty()) {
+        receivedCondVar.wait(read_unique_lock);
       }
     }
-    return 0;
+
+    size_t read_len = std::min(len, receivedBuf.size());
+    std::copy(receivedBuf.begin(),
+              receivedBuf.begin() + read_len,
+              static_cast<uint8_t*> dest_buf);
+    receivedBuf.erase(receivedBuf.begin(),
+                      receivedBuf.begin() + read_len);
+
+    read_unique_lock.unlock();
+
+    return read_len;
   }
 
   /**
