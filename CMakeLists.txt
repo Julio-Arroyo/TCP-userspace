@@ -5,11 +5,16 @@ set(CMAKE_CXX_COMPILER "g++-13")
 
 project(JcTcp)
 
-set(TARGET server_client)
-add_executable(${TARGET} src/Client.cpp
-                         src/JcTcp.cpp
-                         src/JcTcpPacket.cpp
-                         src/JcTcpSocket.cpp
-                         src/JcTcpSocketBackend.cpp)
-target_include_directories(${TARGET} PRIVATE "./inc")
+set(JC_TCP_SOURCES src/JcTcp.cpp
+                   src/JcTcpPacket.cpp
+                   src/JcTcpSocket.cpp
+                   src/JcTcpSocketBackend.cpp)
+
+set(TARGET_CLIENT client)
+add_executable(${TARGET_CLIENT} ${JC_TCP_SOURCES} src/Client.cpp)
+target_include_directories(${TARGET_CLIENT} PRIVATE "./inc")
+
+set(TARGET_SERVER server)
+add_executable(${TARGET_SERVER} ${JC_TCP_SOURCES} src/Server.cpp)
+target_include_directories(${TARGET_SERVER} PRIVATE "./inc")
 
