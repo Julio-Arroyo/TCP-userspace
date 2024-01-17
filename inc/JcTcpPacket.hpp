@@ -37,18 +37,7 @@ namespace JC {
                   const uint16_t packet_len,
                   const uint8_t flags_,
                   const uint16_t advertised_window,
-                  const uint16_t extension_len) {
-    hdr->identifier = JC_TCP_IDENTIFIER;
-    hdr->srcPort = src_port;
-    hdr->destPort = dest_port;
-    hdr->seqNum = seq_num;
-    hdr->ackNum = ack_num;
-    hdr->headerLen = header_len;
-    hdr->packetLen = packet_len;
-    hdr->flags = flags_;
-    hdr->advertisedWindow = advertised_window;
-    hdr->extensionLen = extension_len;
-  }
+                  const uint16_t extension_len);
 }
 
 #endif  // JC_TCP_PACKET_HPP

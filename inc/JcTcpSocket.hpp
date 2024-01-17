@@ -7,6 +7,8 @@
 #include <arpa/inet.h>   // htons, inet_addr
 #include <stdexcept>     // invalid_argument
 #include <algorithm>     // std::copy, std::min
+#include <unistd.h>      // close
+#include <iostream>
 #include <utility>       // std::move
 #include <cstdint>
 #include <cstring>       // std::memset
@@ -25,7 +27,7 @@
 
 #define UNUSED 0
 
-const size_t MaxPayloadSize = MAX_PACKET_SIZE - sizeof(JC::TcpHeader);
+#define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
 namespace JC {
   struct SendState {
@@ -65,8 +67,9 @@ namespace JC {
      *                with INADDR_ANY.
      *   - LISTENER: 'server_ip' and 'port' constitute the
      *               address this socket is bound to.
+     * @return 0 on success, -1 on failure
      */
-    void open(const JC::SocketType socket_type,
+    int open(const JC::SocketType socket_type,
               const int port,
               const std::string& server_ip);
 
@@ -95,7 +98,7 @@ namespace JC {
      *
      * @return 0 on success, -1 on failure
      */
-    int close();
+    int teardown();
 
   private:
     /*** BACKEND METHODS RUNNING IN 'backendThread' ***/
@@ -145,15 +148,15 @@ namespace JC {
     std::mutex receivedMutex;
     std::condition_variable receivedCondVar;
 
-    /* write() puts data into sending_buf, backend empties it and
+    /* write() puts data into sendingBuf, backend empties it and
      * sends it via the udpSocket */
-    std::vector<uint8_t> sending_buf;
+    std::vector<uint8_t> sendingBuf;
     // int sending_len;
-    std::mutex write_mutex;  // synch app & JC-TCP backend
+    std::mutex writeMutex;  // synch app & JC-TCP backend
 
     // whether connection is ready to be closed. Only close() modifies this flag
     bool dying{false};  
-    std::mutex close_mutex;
+    std::mutex closeMutex;
 
     JC::SendState sendState{0, 0, 0};
     JC::RecvState recvState{0, 0, 0};

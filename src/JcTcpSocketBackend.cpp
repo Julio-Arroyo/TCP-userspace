@@ -16,14 +16,14 @@ namespace JC {
       // Check if App called close() already
       bool readyToClose{false};
       {
-        std::lock_guard<std::mutex> close_lock_guard{close_mutex};
+        std::lock_guard<std::mutex> close_lock_guard(closeMutex);
         readyToClose = dying;
       }
 
       // Transmit any data in sending_buf
       std::vector<uint8_t> dataToSend;
       {
-        std::lock_guard<std::mutex> write_lock_guard{write_mutex};
+        std::lock_guard<std::mutex> write_lock_guard{writeMutex};
 
         size_t nBytesToSend = sendingBuf.size();
         if (nBytesToSend == 0) {
@@ -35,7 +35,7 @@ namespace JC {
           assert(sendingBuf.size() == 0);
         }
       }
-      // NOTE: data is sent outside write_mutex critical section
+      // NOTE: data is sent outside writeMutex critical section
       //       so that App can call write() and put data in sending_buf
       if (dataToSend.empty()) {
         TcpSocket::sendOnePacketAtATime(dataToSend);  
@@ -52,14 +52,15 @@ namespace JC {
 
     while (bytes_sent < len) {
       size_t remaining_bytes = len - bytes_sent;
-      size_t payload_size = std::min(remaining_bytes, MaxPayloadSize);
+      size_t payload_size = std::min(remaining_bytes, MAX_PAYLOAD_SIZE);
 
       // *** prepare packet (header and payload) ***
       size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
       std::vector<uint8_t> packet(packet_len);
-      initHeader(static_cast<JC::TcpHeader*>(packet.data()),
+      void* hdr = packet.data();
+      initHeader(static_cast<JC::TcpHeader*>(hdr),
                  myPort,                 // srcPort
-                 ntohs(conn->sin_port),  // destPort
+                 ntohs(conn.sin_port),  // destPort
                  sendState.lastAck,      // seqNum
                  UNUSED,                 // ackNum
                  sizeof(JC::TcpHeader),  // header_len
@@ -78,7 +79,7 @@ namespace JC {
                static_cast<void*>(packet.data()),    // buf
                packet_len,        // len
                0,                 // flags
-               (sockaddr*) conn,  // dest_addr
+               (sockaddr*) &conn,  // dest_addr
                sizeof(conn));     // addrlen
  
         // wait for ACK
@@ -106,8 +107,6 @@ namespace JC {
       return;
     }
 
-    int minBytesAvl = 0;
-
     // optionally wait some time in case no data has been received yet
     if (readMode == JC::ReadMode::TIMEOUT) {
         // wait to see if data comes in
@@ -128,7 +127,7 @@ namespace JC {
                                (void*) &recvdHdr,   /* buf */
                                sizeof(JC::TcpHeader),  /* len */
                                flags,
-                               (sockaddr*) conn,       /* src_addr */
+                               (sockaddr*) &conn,       /* src_addr */
                                &conn_len);             /* addrlen */
 
     if (minBytesAvl >= sizeof(JC::TcpHeader)) {  // >= 1 pkt worth of data
@@ -142,13 +141,13 @@ namespace JC {
                                 static_cast<void*>(recvdPacket.data() + nBytesRecvd),
                                 recvdHdr.packetLen - nBytesRecvd,
                                 UNUSED,  // flags
-                                (sockaddr*) conn,
+                                (sockaddr*) &conn,
                                 &conn_len);
       }
       assert(recvdPacket.size() == recvdHdr.packetLen);
 
       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
-        assert(sendState.ackNum <= recvdHdr.ackNum);
+        assert(sendState.lastAck <= recvdHdr.ackNum);
         assert(nBytesRecvd == sizeof(JC::TcpHeader));
 
         sendState.lastAck = recvdHdr.ackNum;
@@ -160,7 +159,7 @@ namespace JC {
         std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
         size_t curr_recvd_size = receivedBuf.size();
         receivedBuf.resize(curr_recvd_size + nBytesRecvd);
-        std::copy(recvdPacket.begin() + recvdPacket.headerLen,  // start at payload
+        std::copy(recvdPacket.begin() + recvdHdr.headerLen,  // start at payload
                   recvdPacket.end(),
                   receivedBuf.begin() + curr_recvd_size);  // after any data already in buffer
       }
@@ -183,7 +182,7 @@ namespace JC {
              static_cast<void*>(&ackHeader), // buf
              sizeof(JC::TcpHeader),        // len
              0,                 // flags
-             (sockaddr*) conn,  // dest_addr
+             (sockaddr*) &conn,  // dest_addr
              sizeof(conn));     // addrlen
     }
   }

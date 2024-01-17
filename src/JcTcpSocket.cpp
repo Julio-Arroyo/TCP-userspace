@@ -5,13 +5,13 @@ namespace JC {
 
   }
 
-  void TcpSocket::open(const JC::SocketType socket_type,
+  int TcpSocket::open(const JC::SocketType socket_type,
                   const int port,
                   const std::string& server_ip) {
     sockaddr_in conn_, my_addr;
     std::memset(&conn_, 0, sizeof(sockaddr_in));
     std::memset(&my_addr, 0, sizeof(sockaddr_in));
-    my_port = port;
+    myPort = port;
     type = socket_type;
 
     // create a UDP socket
@@ -29,12 +29,12 @@ namespace JC {
         // bind to (INADDR_ANY, port)
         conn_.sin_family = AF_INET;
         conn_.sin_port = htons((uint16_t) port);
-        conn_.sin_addr.saddr = htonl(INADDR_ANY);
+        conn_.sin_addr.s_addr = htonl(INADDR_ANY);
 
         // allow same address to be reused promptly after connection teardown
         int optval = 1;
         setsockopt(udpSocket,
-                   SO_SOCKET,              // manipulate options at socket API level
+                   SOL_SOCKET,             // manipulate options at socket API level
                    SO_REUSEADDR,           // name of option
                    (const void*) &optval,  // non-zero ==> enable option
                    sizeof(optval));
@@ -55,11 +55,11 @@ namespace JC {
 
         conn_.sin_family = AF_INET;
         conn_.sin_port = htons((uint16_t) port);
-        conn_.sin_addr.saddr = inet_addr(server_ip.c_str());
+        conn_.sin_addr.s_addr = inet_addr(server_ip.c_str());
 
         my_addr.sin_family = AF_INET;
         my_addr.sin_port = 0;
-        my_addr.sin_addr.saddr = htonl(INADDR_ANY);
+        my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         if (-1 == bind(udpSocket, (sockaddr*) &my_addr, sizeof(my_addr))) {
           assert(false);
           return JC_EXIT_FAILURE;
@@ -70,7 +70,7 @@ namespace JC {
     }
     socklen_t my_addr_sz = sizeof(my_addr);
     getsockname(udpSocket, (sockaddr*) &my_addr, &my_addr_sz);
-    my_port = ntohs(my_addr.sin_port);
+    myPort = ntohs(my_addr.sin_port);
 
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
@@ -83,9 +83,12 @@ namespace JC {
     if (read_mode == JC::ReadMode::TIMEOUT) {
       std::cerr << "jc_read does not implement read_mode=TIMEOUT" << std::endl;
       return JC_EXIT_FAILURE;
+    } else if (len < 0) {
+      std::cerr << "Cannot read negative no. of bytes" << std::endl;
+      return JC_EXIT_FAILURE;
     }
 
-    std::unique_lock<std::mutex> read_unique_lock{readMutex};  // acquire lock
+    std::unique_lock<std::mutex> read_unique_lock(receivedMutex);  // acquire lock
 
     if (read_mode == JC::ReadMode::BLOCK) {
       if (receivedBuf.empty()) {
@@ -93,10 +96,11 @@ namespace JC {
       }
     }
 
-    size_t read_len = std::min(len, receivedBuf.size());
+    size_t read_len = std::min(static_cast<size_t>(len),
+                               receivedBuf.size());
     std::copy(receivedBuf.begin(),
               receivedBuf.begin() + read_len,
-              static_cast<uint8_t*> dest_buf);
+              static_cast<uint8_t*>(dest_buf));
     receivedBuf.erase(receivedBuf.begin(),
                       receivedBuf.begin() + read_len);
 
@@ -109,7 +113,7 @@ namespace JC {
    * Writes data to the JC-TCP socket.
    *
    * From an implementation perspective, the data in src_buf is copied
-   * into sending_buf. The Backend is then responsible for emptying it
+   * into sendingBuf. The Backend is then responsible for emptying it
    * and actually sending the data over the network.
    */
   int TcpSocket::write(void* src_buf, const int write_len) {
@@ -118,23 +122,23 @@ namespace JC {
       return JC_EXIT_FAILURE;
     }
 
-    std::lock_guard<std::mutex> write_lock_guard{write_mutex};
+    std::lock_guard<std::mutex> write_lock_guard{writeMutex};
 
-    // copy data from 'src_buf' into 'sending_buf'
-    int curr_sending_size = sending_buf.size();
-    sending_buf.resize(curr_sending_size + write_len);  // add space for new 'write_len' bytes
+    // copy data from 'src_buf' into 'sendingBuf'
+    int curr_sending_size = sendingBuf.size();
+    sendingBuf.resize(curr_sending_size + write_len);  // add space for new 'write_len' bytes
     uint8_t* src_buf_bytes = static_cast<uint8_t*>(src_buf);
     std::copy(src_buf_bytes,
               src_buf_bytes + write_len,
-              sending_buf.begin() + curr_sending_size);
+              sendingBuf.begin() + curr_sending_size);
 
     return JC_EXIT_SUCCESS;
   }
 
-  int TcpSocket::close() {
-    std::lock_guard<std::mutex> close_lock_guard{close_mutex};
+  int TcpSocket::teardown() {
+    std::lock_guard<std::mutex> close_lock_guard{closeMutex};
     dying = true;
-    return JC_EXIT_SUCCESS;
+    return close(udpSocket);
   }
 }
 
