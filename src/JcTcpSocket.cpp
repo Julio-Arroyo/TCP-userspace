@@ -136,8 +136,13 @@ namespace JC {
   }
 
   int TcpSocket::teardown() {
-    std::lock_guard<std::mutex> close_lock_guard{closeMutex};
-    dying = true;
+    {
+      std::lock_guard<std::mutex> close_lock_guard{closeMutex};
+      dying = true;
+    }
+
+    backendThread.join();
+
     return close(udpSocket);
   }
 }
