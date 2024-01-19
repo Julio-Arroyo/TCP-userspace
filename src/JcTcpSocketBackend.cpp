@@ -35,9 +35,10 @@ namespace JC {
           assert(sendingBuf.size() == 0);
         }
       }
+
       // NOTE: data is sent outside writeMutex critical section
       //       so that App can call write() and put data in sending_buf
-      if (dataToSend.empty()) {
+      if (!dataToSend.empty()) {
         TcpSocket::sendOnePacketAtATime(dataToSend);  
       }
 
@@ -60,7 +61,7 @@ namespace JC {
       void* hdr = packet.data();
       initHeader(static_cast<JC::TcpHeader*>(hdr),
                  myPort,                 // srcPort
-                 ntohs(conn.sin_port),  // destPort
+                 ntohs(conn.sin_port),   // destPort
                  sendState.lastAck,      // seqNum
                  UNUSED,                 // ackNum
                  sizeof(JC::TcpHeader),  // header_len
@@ -81,6 +82,7 @@ namespace JC {
                0,                 // flags
                (sockaddr*) &conn,  // dest_addr
                sizeof(conn));     // addrlen
+        sendState.lastSent = bytes_sent + payload_size;
  
         // wait for ACK
         TcpSocket::receiveIncomingData(ReadMode::TIMEOUT);
@@ -130,7 +132,7 @@ namespace JC {
                                (sockaddr*) &conn,       /* src_addr */
                                &conn_len);             /* addrlen */
 
-    if (minBytesAvl >= sizeof(JC::TcpHeader)) {  // >= 1 pkt worth of data
+    if (minBytesAvl >= static_cast<int>(sizeof(JC::TcpHeader))) {  // >= 1 pkt worth of data
       // extract the entire packet (header + payload) from socket
       size_t nBytesRecvd{0};
       std::vector<uint8_t> recvdPacket(recvdHdr.packetLen);
@@ -147,7 +149,13 @@ namespace JC {
       assert(recvdPacket.size() == recvdHdr.packetLen);
 
       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
-        assert(sendState.lastAck <= recvdHdr.ackNum);
+        if (sendState.lastAck > recvdHdr.ackNum) {
+          std::cerr << "ERROR receiveIncomingData:" << std::endl;
+          std::cerr << "lastAck=" << sendState.lastAck
+                    << " > "
+                    << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
+          return;
+        }
         assert(nBytesRecvd == sizeof(JC::TcpHeader));
 
         sendState.lastAck = recvdHdr.ackNum;

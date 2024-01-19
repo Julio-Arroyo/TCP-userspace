@@ -12,14 +12,12 @@ int main() {
             SERVER_IP_ADDR);
 
   // block so that server has time to startu up
-  std::cout << "Waiting for server... type something to continue: " << std::endl;
-  std::string dummyBlock;
-  std::cin >> dummyBlock;
+  std::cout << "Type a message to send to the Server: " << std::endl;
+  std::string msg;
+  std::cin >> msg;
+  sock.write(static_cast<void*>(msg.data()), msg.length());
 
   sock.teardown();
-
-  std::cout << "Type something else to exit program." << std::endl;
-  std::cin >> dummyBlock;
 
   return 0;
 }

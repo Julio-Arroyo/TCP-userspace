@@ -91,7 +91,7 @@ namespace JC {
     std::unique_lock<std::mutex> read_unique_lock(receivedMutex);  // acquire lock
 
     if (read_mode == JC::ReadMode::BLOCK) {
-      if (receivedBuf.empty()) {
+      while (receivedBuf.empty()) {
         receivedCondVar.wait(read_unique_lock);
       }
     }
