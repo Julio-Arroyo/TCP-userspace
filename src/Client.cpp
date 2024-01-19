@@ -17,6 +17,7 @@ void transferFile(const std::string& fname) {
   fileToTransfer.close();
   std::string contents = buf.str();
   std::cout << contents << std::endl;
+  std::cout << "contents.length() " << contents.length() << std::endl;
 
   JC::TcpSocket sock;
   sock.open(JC::SocketType::TCP_INITIATOR, SERVER_PORT, SERVER_IP_ADDR);
@@ -55,9 +56,9 @@ void transmitNumberSequence(const int sequence_len) {
 }
 
 int main() {
-  // transferFile("../inc/JcTcpSocket.hpp");
+  transferFile("../inc/JcTcpSocket.hpp");
 
-  transmitNumberSequence(1800);
+  // transmitNumberSequence(1800);
 
   return 0;
 }

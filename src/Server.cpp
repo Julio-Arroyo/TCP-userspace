@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-#define BUF_SIZE 2000 
+#define BUF_SIZE 2048
 #define MAX_ATTEMPTS 100
 
 void receiveFile() {
@@ -12,11 +12,12 @@ void receiveFile() {
   char line[BUF_SIZE];
   int file_size = 0;
   while (true) {
-    file_size += sock.read(static_cast<void*>(line + file_size), BUF_SIZE, JC::ReadMode::BLOCK);
-    std::string line_str(line + file_size);
-    std::cout << line_str << std::endl;
+    int read_size = sock.read(static_cast<void*>(line), BUF_SIZE, JC::ReadMode::BLOCK);
+    file_size += read_size;
+    std::string line_str(line);
+    std::cout << line_str.substr(0, read_size);
 
-    std::cout << "line_len " << file_size << std::endl;
+    // std::cout << "line_len " << file_size << std::endl;
   }
   // size_t attempts = 0;
   // while (line_len > 0 || attempts++ < MAX_ATTEMPTS) {
@@ -49,8 +50,8 @@ void receiveNumberSequence() {
 }
 
 int main() {
-  // receiveFile();
+  receiveFile();
 
-  receiveNumberSequence();
+  // receiveNumberSequence();
   return 0;
 }
