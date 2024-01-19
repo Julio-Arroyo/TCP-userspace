@@ -58,7 +58,7 @@ namespace JC {
       // *** prepare packet (header and payload) ***
       size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
       std::vector<uint8_t> packet(packet_len);
-      void* hdr = packet.data();
+      void* hdr = packet.data() + bytes_sent;
       initHeader(static_cast<JC::TcpHeader*>(hdr),
                  myPort,                 // srcPort
                  ntohs(conn.sin_port),   // destPort
@@ -72,16 +72,16 @@ namespace JC {
       // prepare payload
       std::copy(dataToSend.begin() + bytes_sent,
                 dataToSend.begin() + bytes_sent + payload_size,
-                packet.data() + sizeof(JC::TcpHeader) + bytes_sent);
+                packet.data() + bytes_sent + sizeof(JC::TcpHeader));
 
       for (;;) {
-        // send one packet
-        sendto(udpSocket,         // sockfd
-               static_cast<void*>(packet.data()),    // buf
-               packet_len,        // len
-               0,                 // flags
+        // send one packet (i.e send 'packet_len' bytes starting at 'hdr')
+        sendto(udpSocket,          // sockfd
+               hdr,                // buf
+               packet_len,         // len
+               0,                  // flags
                (sockaddr*) &conn,  // dest_addr
-               sizeof(conn));     // addrlen
+               sizeof(conn));      // addrlen
         sendState.lastSent = bytes_sent + payload_size;
  
         // wait for ACK
@@ -163,10 +163,11 @@ namespace JC {
       }
 
       // Write the received payload into receivedBuf
+      size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
       {
         std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
         size_t curr_recvd_size = receivedBuf.size();
-        receivedBuf.resize(curr_recvd_size + nBytesRecvd);
+        receivedBuf.resize(curr_recvd_size + payload_len);
         std::copy(recvdPacket.begin() + recvdHdr.headerLen,  // start at payload
                   recvdPacket.end(),
                   receivedBuf.begin() + curr_recvd_size);  // after any data already in buffer
@@ -174,7 +175,6 @@ namespace JC {
       receivedCondVar.notify_all();
 
       // REPLY with ACK
-      size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
       JC::TcpHeader ackHeader;
       initHeader(&ackHeader,
                  myPort,                         // srcPort
