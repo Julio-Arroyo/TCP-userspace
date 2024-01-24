@@ -2,7 +2,7 @@
 
 namespace JC {
   TcpSocket::TcpSocket() {
-
+    std::srand(JC_TCP_IDENTIFIER);
   }
 
   int TcpSocket::open(const JC::SocketType socket_type,
@@ -11,7 +11,6 @@ namespace JC {
     sockaddr_in conn_, my_addr;
     std::memset(&conn_, 0, sizeof(sockaddr_in));
     std::memset(&my_addr, 0, sizeof(sockaddr_in));
-    myPort = port;
     type = socket_type;
 
     // create a UDP socket
@@ -43,11 +42,76 @@ namespace JC {
           return JC_EXIT_FAILURE;
         }
         conn = conn_;
+        myPort = port;
+        
+        // *** Three-way handshake ***
+
+        // wait for client's initiation request
+        socklen_t conn_len = sizeof(conn);
+        JC::TcpHeader initiationRequest;
+        while (true) {
+          struct pollfd pfd;
+          pfd.fd = udpSocket;
+          pfd.events = POLLIN;  // there is data to read
+          std::cout << "Waiting for client to initiate connection" << std::endl;
+          if (0 != poll(&pfd, 1, 10 * 1000)) {
+            int bytes_recvd = recvfrom(udpsocket,
+                                       (void*) &initiationRequest,
+                                       sizeof(JC::TcpHeader),
+                                       MSG_DONTWAIT,
+                                       static_cast<sockaddr*>(&conn),
+                                       &conn_len);
+            if (bytes_recvd == sizeof(JC::TcpHeader) &&
+                (JC_TCP_SYN_FLAG & initiationRequest.flags)) {
+              std::cout << "Received client connection request" << std::endl;
+              break;
+            }
+          }
+        }
+
+        // Respond to connection request, defining starting seqNum
+        uint32_t first_seq_num = std::rand();
+        std::cout << "Server start seqnum " << first_seq_num << std::endl;  // DEBUG
+        JC::TcpHeader initiationResponse;
+        initHeader(&initiationResponse,
+                   myPort,
+                   ntohs(conn.sin_port),
+                   first_seq_num,
+                   initiationRequest.seqNum + 1,  // ackNum
+                   sizeof(JC::TcpHeader),
+                   sizeof(JC::TcpHeader),
+                   JC_TCP_SYN_FLAG | JC_TCP_ACK_FLAG,
+                   UNUSED,
+                   UNUSED);
+        sendto(udpSocket,
+               static_cast<void*>(&initiationResponse),
+               sizeof(JC::TcpHeader),
+               0,
+               static_cast<sockaddr*>(&conn),
+               sizeof(conn));
+        std::cout << "Accepted connection. Waiting for client confirmation"
+                  << std::endl;
+
+        // wait for Ack
+        JC::TcpHeader confirmationAck;
+        int bytes_confi = recvfrom(udpsocket,
+                                   (void*) &initiationRequest,
+                                   sizeof(JC::TcpHeader),
+                                   MSG_DONTWAIT,
+                                   static_cast<sockaddr*>(&conn),
+                                   &conn_len);
+        if (bytes_confi == sizeof(JC::TcpHeader) &&
+            (confirmationAck.flags & JC_TCP_ACK_FLAG) &&
+            (confirmationAck.ackNum == first_seq_num + 1)) {
+          std::cout << "Three-way handshake successfully completed."
+                    << std::endl;
+        }
         break;
       }
       case JC::SocketType::TCP_INITIATOR: {
         // bind to (INADDR_ANY, random usable port)
         // connect to (server_ip, port)
+
         if (server_ip == "") {
           throw std::invalid_argument("Cannot initiate connection with empty address '""'");
           return JC_EXIT_FAILURE;
@@ -65,13 +129,41 @@ namespace JC {
           return JC_EXIT_FAILURE;
         }
         conn = conn_;
+
+        socklen_t my_addr_sz = sizeof(my_addr);
+        getsockname(udpSocket, (sockaddr*) &my_addr, &my_addr_sz);
+        myPort = ntohs(my_addr.sin_port);
+
+        // Request to initiate connection
+        uint32_t first_seq_num = std::rand();
+        std::cout << "Server start seqnum " << first_seq_num << std::endl;
+        JC::TcpHeader connectionRequest;
+        initHeader(&connectionRequest,
+                   myPort,
+                   ntohs(conn.sin_port),
+                   first_seq_num,
+                   UNUSED,  // ackNum
+                   sizeof(JC::TcpHeader),
+                   sizeof(JC::TcpHeader),
+                   JC_TCP_SYN_FLAG,
+                   UNUSED,
+                   UNUSED);
+        sendto(udpSocket,
+               static_cast<void*>(&connectionRequest),
+               sizeof(JC::TcpHeader),
+               0,
+               static_cast<sockaddr*>(&conn),
+               sizeof(conn));
+        std::cout << "Waiting for server to accept connection request..."
+                  << std::endl;
+        // TODO
+        // receiveblocking
+        // send
         break;                                       
       }
     }
-    socklen_t my_addr_sz = sizeof(my_addr);
-    getsockname(udpSocket, (sockaddr*) &my_addr, &my_addr_sz);
-    myPort = ntohs(my_addr.sin_port);
 
+    assert(myPort != 0);
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
     return JC_EXIT_SUCCESS;

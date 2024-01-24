@@ -11,6 +11,7 @@
 #include <iostream>
 #include <utility>       // std::move
 #include <cstdint>
+#include <cstdlib>       // std::rand
 #include <cstring>       // std::memset
 #include <cassert>
 #include <poll.h>        // poll
@@ -131,7 +132,7 @@ namespace JC {
     std::thread backendThread;
 
     int udpSocket;
-    uint16_t myPort;
+    uint16_t myPort{0};
     JC::SocketType type;
 
     /* If 'type' is TCP_INITIATOR, 'conn' is the (ip, port) this socket
