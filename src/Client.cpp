@@ -16,7 +16,7 @@ void transferFile(const std::string& fname) {
   buf << fileToTransfer.rdbuf();
   fileToTransfer.close();
   std::string contents = buf.str();
-  std::cout << contents << std::endl;
+  // std::cout << contents << std::endl;
   std::cout << "contents.length() " << contents.length() << std::endl;
 
   JC::TcpSocket sock;

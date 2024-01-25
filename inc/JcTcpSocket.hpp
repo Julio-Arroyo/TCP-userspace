@@ -30,6 +30,8 @@
 
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
+// ACK ~ receiver sets ackNum to the nextExpected seqNum
+
 namespace JC {
   struct SendState {
     uint32_t lastAck;

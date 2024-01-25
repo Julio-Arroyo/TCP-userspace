@@ -1,6 +1,7 @@
 #include "JcTcp.hpp"
 
 #include <iostream>
+#include <limits>
 
 #define BUF_SIZE 2048
 #define MAX_ATTEMPTS 100
