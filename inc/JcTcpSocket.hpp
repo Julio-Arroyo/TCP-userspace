@@ -18,7 +18,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <chrono>
 #include <mutex>
+#include <list>
 
 #include "JcTcpPacket.hpp"
 #include "Config.hpp"
@@ -38,8 +40,7 @@
 namespace JC {
   struct RetransmissionInfo {
     std::chrono::time_point<CLOCK> transmissionTime;
-    uint32_t seqNum;
-    uint16_t packetLen;
+    std::vector<uint8_t> packet;
   };
 
   struct SendInfo {
@@ -183,7 +184,7 @@ namespace JC {
 
     JC::SendInfo sendInfo{0, 0, 0};
     JC::RecvInfo recvInfo{0, 0, 0};
-    std::vector<JC::RetransmissionInfo> unackedPacketsInfo;
+    std::list<JC::RetransmissionInfo> unackedPacketsInfo;
   };
 }
 

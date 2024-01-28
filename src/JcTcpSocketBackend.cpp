@@ -86,7 +86,7 @@ namespace JC {
                  myPort,
                  ntohs(conn.sin_port),
                  seq_num,
-                 recvInfo.nextExpected,              // ackNum
+                 recvInfo.nextExpected,  // ackNum
                  sizeof(JC::TcpHeader),
                  packet_len,
                  JC_TCP_ACK_FLAG,
@@ -106,10 +106,47 @@ namespace JC {
       nbytes_sent += payload_size;
 
       // record info in case packet is not ACK'd
-      unackedPacketsInfo.emplace_back(transmission_time, seq_num, packet_len);
+      JC::RetransmissionInfo retransmission_info;
+      retransmission_info.transmissionTime = transmission_time;
+      retransmission_info.packet = std::move(packet);
+      unackedPacketsInfo.push_back(retransmission_info);
     }
   }
 
+  void resendOldData() {
+    std::chrono::time_point<CLOCK> now = CLOCK::now();
+    std::list<JC::RetransmissionInfo>::iterator it = unackedPacketsInfo.begin();
+    while (it != unackedPacketsInfo.end()) {
+      assert(it->packet.empty());
+      void* packet = static_cast<void*>(it->packet.data());
+      
+      // It may have already been ACK'd
+      JC::TcpHeader* hdr = static_cast<JC::TcpHeader*>(packet);
+      if (hdr->seqNum < sendInfo.lastAck) {
+        unackedPacketsInfo.pop_front();
+        continue;
+      }
+
+      // if this packet's timer hasn't expired, subsequent packets' haven't either
+      std::chrono::milliseconds elapsed_time
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - retransmission_info.transmissionTime);
+      if (elapsed_time.count() < ACK_TIMEOUT) {
+        break;
+      }
+
+      // Resend packet
+      hdr->ackNum = recvInfo.nextExpected;
+      hdr->advertisedWindow = recvInfo.getAdvertisedWindow();
+      sendto(udpSocket,
+             packet,
+             packet.size(),
+             UNUSED,         // flags
+             (sockaddr*) &conn,
+             sizeof(conn));
+    }
+  }
+
+  /*
   void TcpSocket::sendOnePacketAtATime(std::vector<uint8_t>& dataToSend) {
     size_t len = dataToSend.size();
     size_t bytes_sent{0};
@@ -161,6 +198,7 @@ namespace JC {
       bytes_sent += payload_size;
     }
   }
+  */
 
   /**
    * First extract packet. Then payload
