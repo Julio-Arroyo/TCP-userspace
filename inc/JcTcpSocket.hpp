@@ -30,19 +30,38 @@
 
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
+#define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
+#define CLOCK std::chrono::high_resolution_clock
+
 // ACK ~ receiver sets ackNum to the nextExpected seqNum
 
 namespace JC {
-  struct SendState {
-    uint32_t lastAck;
-    uint32_t lastSent;
-    uint32_t lastWritten;
+  struct RetransmissionInfo {
+    std::chrono::time_point<CLOCK> transmissionTime;
+    uint32_t seqNum;
+    uint16_t packetLen;
   };
 
-  struct RecvState {
-    uint32_t lastRead;
+  struct SendInfo {
+    uint32_t lastAck;      // Backend's read index
+    uint32_t nextToSend;
+    uint32_t nextToWrite;  // Frontend's write index
+  };
+
+  /* Receiver side of connection maintains a set of seqNum's */
+  struct RecvInfo {
+    uint32_t nextToRead;
     uint32_t nextExpected;
+
+    /* If packet w/ seqNum = 650 is received with payload_len = 100,
+     * then lastReceived = 749 */
     uint32_t lastReceived;
+
+    uint16_t getAdvertisedWindow() {
+      uint16_t num_buffered_bytes = lastReceived + 1 - nextToRead;
+      assert(num_buffered_bytes <= BUF_CAP);
+      return BUF_CAP - num_buffered_bytes;  // TODO: static_cast<uint16_t>
+    }
   };
 
   enum SocketType {
@@ -104,8 +123,7 @@ namespace JC {
     int teardown();
 
   private:
-    /*** BACKEND METHODS RUNNING IN 'backendThread' ***/
-
+    /*** BACKEND API ('backendThread' logic) ***/
     /**
      * @brief JC-TCP backend main routine
      */
@@ -117,7 +135,9 @@ namespace JC {
      *
      * @param dataToSend Raw bytes to be transmitted over the network.
      */
-    void sendOnePacketAtATime(std::vector<uint8_t>& dataToSend);
+    // void sendOnePacketAtATime(std::vector<uint8_t>& dataToSend);
+    void sendNewData(size_t num_unsent_bytes);
+    void resendOldData();
 
     /**
      * Checks udpSocket for any incoming data. If it sees anything,
@@ -132,6 +152,7 @@ namespace JC {
     void receiveIncomingData(const JC::ReadMode readMode);
 
     std::thread backendThread;
+    /*** END OF BACKEND API ***/
 
     int udpSocket;
     uint16_t myPort{0};
@@ -146,23 +167,23 @@ namespace JC {
     /* Backend constantly checks udpSocket for incoming data, and puts
      * anything it received into receivedBuf. read() then directly
      * retrieves data from receivedBuf */
-    std::vector<uint8_t> receivedBuf;
-    // int received_len;
+    std::array<uint8_t, BUF_CAP> recvBuf;
     std::mutex receivedMutex;
     std::condition_variable receivedCondVar;
+    std::array<bool, BUF_CAP> yetToAck;
 
     /* write() puts data into sendingBuf, backend empties it and
      * sends it via the udpSocket */
-    std::vector<uint8_t> sendingBuf;
-    // int sending_len;
+    std::array<uint8_t, BUF_CAP> sendBuf;
     std::mutex writeMutex;  // synch app & JC-TCP backend
 
     // whether connection is ready to be closed. Only close() modifies this flag
     bool dying{false};  
     std::mutex closeMutex;
 
-    JC::SendState sendState{0, 0, 0};
-    JC::RecvState recvState{0, 0, 0};
+    JC::SendInfo sendInfo{0, 0, 0};
+    JC::RecvInfo recvInfo{0, 0, 0};
+    std::vector<JC::RetransmissionInfo> unackedPacketsInfo;
   };
 }
 
