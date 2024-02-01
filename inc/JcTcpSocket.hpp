@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <cstdlib>       // std::rand
 #include <cstring>       // std::memset
-#include <cassert>
+#include <cassert>       // assert()
 #include <poll.h>        // poll
 #include <string>
 #include <thread>
@@ -47,6 +47,7 @@ namespace JC {
     uint32_t lastAck;      // Backend's read index
     uint32_t nextToSend;
     uint32_t nextToWrite;  // Frontend's write index
+    uint16_t otherSideAdvWindow;
   };
 
   /* Receiver side of connection maintains a set of seqNum's */

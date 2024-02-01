@@ -52,8 +52,8 @@ namespace JC {
           struct pollfd pfd;
           pfd.fd = udpSocket;
           pfd.events = POLLIN;  // there is data to read
-          std::cout << "[LOG]: Waiting for client to initiate connection..." << std::endl;
-          if (0 != poll(&pfd, 1, 10 * 1000)) {
+          LOG("Waiting for client to initiate connection...");
+          if (0 != poll(&pfd, 1, 10*1000 /* TIMEOUT */)) {
             int bytes_recvd = recvfrom(udpSocket,
                                        (void*) &initiationRequest,
                                        sizeof(JC::TcpHeader),
@@ -62,8 +62,13 @@ namespace JC {
                                        &conn_len);
             if (bytes_recvd == sizeof(JC::TcpHeader) &&
                 (JC_TCP_SYN_FLAG & initiationRequest.flags)) {
-              recvState.nextExpected = initiationRequest.seqNum + 1;
-              std::cout << "[LOG]: Received client connection request..." << std::endl;
+              recvInfo.nextExpected = initiationRequest.seqNum + 1;
+              recvInfo.nextToRead = initiationRequest.seqNum + 1;
+              std::cout << "Server next to read: " << recvInfo.nextToRead << std::endl;
+              recvInfo.lastReceived = initiationRequest.seqNum;
+              sendInfo.otherSideAdvWindow = initiationRequest.advertisedWindow;
+              assert(sendInfo.otherSideAdvWindow == BUF_CAP);
+              LOG("Received client connection request...");
               break;
             }
           }
@@ -76,20 +81,21 @@ namespace JC {
                    myPort,
                    ntohs(conn.sin_port),
                    first_seq_num,
-                   recvState.nextExpected,  // ackNum
+                   recvInfo.nextExpected,  // ackNum
                    sizeof(JC::TcpHeader),
                    sizeof(JC::TcpHeader),
                    JC_TCP_SYN_FLAG | JC_TCP_ACK_FLAG,
-                   UNUSED,
-                   UNUSED);
-        for (;;) {
+                   recvInfo.getAdvertisedWindow(),   // advertisedWindow
+                   UNUSED);  // extensionLen
+        for (;;) {  // TODO: remove useless infinite loop
           sendto(udpSocket,
                  static_cast<void*>(&initiationResponse),
                  sizeof(JC::TcpHeader),
                  0,
                  (sockaddr*) (&conn),
                  sizeof(conn));
-          sendState.lastSent = first_seq_num + 1;
+          sendInfo.nextToSend = first_seq_num + 1;
+          sendInfo.nextToWrite = first_seq_num + 1;
           break;
 
           //// wait for Ack
@@ -111,18 +117,17 @@ namespace JC {
         break;
       }
       case JC::SocketType::TCP_INITIATOR: {
-        // bind to (INADDR_ANY, random usable port)
-        // connect to (server_ip, port)
-
         if (server_ip == "") {
           throw std::invalid_argument("Cannot initiate connection with empty address '""'");
           return JC_EXIT_FAILURE;
         }
 
+        // connect to (server_ip, port)
         conn_.sin_family = AF_INET;
         conn_.sin_port = htons((uint16_t) port);
         conn_.sin_addr.s_addr = inet_addr(server_ip.c_str());
 
+        // bind to (INADDR_ANY, random usable port)
         my_addr.sin_family = AF_INET;
         my_addr.sin_port = 0;
         my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -148,8 +153,8 @@ namespace JC {
                    sizeof(JC::TcpHeader),
                    sizeof(JC::TcpHeader),
                    JC_TCP_SYN_FLAG,
-                   UNUSED,
-                   UNUSED);
+                   BUF_CAP,   // advertisedWindow
+                   UNUSED);  // extensionLen
         for (;;) {
           sendto(udpSocket,
                  static_cast<void*>(&connectionRequest),
@@ -157,9 +162,10 @@ namespace JC {
                  0,
                  (sockaddr*) &conn,
                  sizeof(conn));
-          sendState.lastSent = first_seq_num + 1;
-          std::cout << "Waiting for server to accept connection request..."
-                    << std::endl;
+          sendInfo.nextToSend = first_seq_num + 1;
+          sendInfo.nextToWrite = first_seq_num + 1;
+          std::cout << "FSN + 1: " << sendInfo.nextToSend << std::endl;
+          LOG("Waiting for server to accept connection request...");
 
           struct pollfd pfd;
           pfd.fd = udpSocket;
@@ -180,30 +186,33 @@ namespace JC {
                 (server_response.flags & JC_TCP_ACK_FLAG) &&
                 (server_response.ackNum == first_seq_num + 1))
             {
-                std::cout << "Server accepted connection!" << std::endl;
+              LOG("Server accepted connection!");
+              sendInfo.lastAck = server_response.ackNum;
+              recvInfo.nextExpected = server_response.seqNum + 1;
+              recvInfo.nextToRead = server_response.seqNum + 1;
+              recvInfo.lastReceived = server_response.seqNum;
+              sendInfo.otherSideAdvWindow = server_response.advertisedWindow;
+              assert(sendInfo.otherSideAdvWindow == BUF_CAP);
 
-                sendState.lastAck = server_response.ackNum;
-                recvState.nextExpected = server_response.seqNum + 1;
-
-                // acknowledge server's acceptance
-                JC::TcpHeader acceptance_ack;
-                initHeader(&acceptance_ack,
-                           myPort,
-                           ntohs(conn.sin_port),
-                           UNUSED,  // seqNum: seq will be ignored because it's not expected 
-                           recvState.nextExpected,      // ackNum
-                           sizeof(JC::TcpHeader),
-                           sizeof(JC::TcpHeader),
-                           JC_TCP_ACK_FLAG,
-                           UNUSED,                      // advertisedWindow
-                           UNUSED);                     // extensionLen
-                sendto(udpSocket,
-                       static_cast<void*>(&acceptance_ack),
-                       sizeof(JC::TcpHeader),
-                       0,
-                       (sockaddr*) (&conn),
-                       sizeof(conn));
-                break;  // from infinite loop
+              // acknowledge server's acceptance
+              JC::TcpHeader acceptance_ack;
+              initHeader(&acceptance_ack,
+                         myPort,
+                         ntohs(conn.sin_port),
+                         UNUSED,  // seqNum: seq will be ignored because it's not expected 
+                         recvInfo.nextExpected,   // ackNum
+                         sizeof(JC::TcpHeader),
+                         sizeof(JC::TcpHeader),
+                         JC_TCP_ACK_FLAG,
+                         recvInfo.getAdvertisedWindow(), 
+                         UNUSED);                 // extensionLen
+              sendto(udpSocket,
+                     static_cast<void*>(&acceptance_ack),
+                     sizeof(JC::TcpHeader),
+                     0,
+                     (sockaddr*) (&conn),
+                     sizeof(conn));
+              break;  // from infinite loop
             }
           }
         }
@@ -212,7 +221,10 @@ namespace JC {
     }
 
     assert(myPort != 0);
-    std::cout << "Launching backend..." << std::endl;
+    assert(sendInfo.nextToSend == sendInfo.nextToWrite);
+    assert(recvInfo.lastReceived + 1 == recvInfo.nextToRead);
+    assert(recvInfo.nextToRead == recvInfo.nextExpected);
+    LOG("Launching backend...");
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
     return JC_EXIT_SUCCESS;
@@ -221,6 +233,7 @@ namespace JC {
   int TcpSocket::read(void* dest_buf,
                       const int len,
                       const JC::ReadMode read_mode) {
+    std::cout << "read()" << std::endl;
     if (read_mode == JC::ReadMode::TIMEOUT) {
       std::cerr << "jc_read does not implement read_mode=TIMEOUT" << std::endl;
       return JC_EXIT_FAILURE;
@@ -231,21 +244,24 @@ namespace JC {
 
     std::unique_lock<std::mutex> read_unique_lock(receivedMutex);  // acquire lock
 
+    // Block until there is data to read
+    size_t unread_bytes = recvInfo.nextExpected - recvInfo.nextToRead;
     if (read_mode == JC::ReadMode::BLOCK) {
-      while (receivedBuf.empty()) {
+      while (unread_bytes == 0) {
         receivedCondVar.wait(read_unique_lock);
+        unread_bytes = recvInfo.nextExpected - recvInfo.nextToRead;
+        std::cout << "unread_bytes: " << unread_bytes << std::endl;
       }
     }
 
-    size_t read_len = std::min(static_cast<size_t>(len),
-                               receivedBuf.size());
-    std::copy(receivedBuf.begin(),
-              receivedBuf.begin() + read_len,
-              static_cast<uint8_t*>(dest_buf));
-    receivedBuf.erase(receivedBuf.begin(),
-                      receivedBuf.begin() + read_len);
-
-    read_unique_lock.unlock();
+    // move bytes from recvBuf into dest_buf
+    size_t read_len = std::min(static_cast<size_t>(len), unread_bytes);
+    uint8_t* dest_buf_bytes = static_cast<uint8_t*>(dest_buf);
+    for (int i = 0; i < read_len; i++) {
+      // std::cout << recvBuf[(recvInfo.nextToRead + i) % BUF_CAP];
+      dest_buf_bytes[i] = recvBuf[(recvInfo.nextToRead + i) % BUF_CAP];
+    }
+    recvInfo.nextToRead += read_len;
 
     return read_len;
   }
@@ -254,7 +270,7 @@ namespace JC {
    * Writes data to the JC-TCP socket.
    *
    * From an implementation perspective, the data in src_buf is copied
-   * into sendingBuf. The Backend is then responsible for emptying it
+   * into sendBuf. The Backend is then responsible for emptying it
    * and actually sending the data over the network.
    */
   int TcpSocket::write(void* src_buf, const int write_len) {
@@ -265,13 +281,14 @@ namespace JC {
 
     std::lock_guard<std::mutex> write_lock_guard{writeMutex};
 
-    // copy data from 'src_buf' into 'sendingBuf'
-    int curr_sending_size = sendingBuf.size();
-    sendingBuf.resize(curr_sending_size + write_len);  // add space for new 'write_len' bytes
     uint8_t* src_buf_bytes = static_cast<uint8_t*>(src_buf);
-    std::copy(src_buf_bytes,
-              src_buf_bytes + write_len,
-              sendingBuf.begin() + curr_sending_size);
+    // copy data from 'src_buf' into 'sendBuf'
+    for (uint32_t i = 0; i < write_len; i++) {
+      std::cout << "nomod: " << (sendInfo.nextToWrite + i) << std::endl;  // DEBUG
+      sendBuf[(sendInfo.nextToWrite + i) % BUF_CAP] = src_buf_bytes[i];
+      std::cout << "mod: " << ((sendInfo.nextToWrite + i) % BUF_CAP) << std::endl;  // DEBUG
+    }
+    sendInfo.nextToWrite += write_len;
 
     return JC_EXIT_SUCCESS;
   }

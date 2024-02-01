@@ -12,16 +12,15 @@ namespace JC {
    *     save the received the 
    */
   void TcpSocket::beginBackend() {
+    bool ready_to_close{false};
+    size_t num_unsent_bytes;
     for (;;) {
-      // Check if App called close() already
-      bool ready_to_close{false};
-      {
+      {  // Check if App called close() already
         std::lock_guard<std::mutex> close_lock_guard(closeMutex);
         ready_to_close = dying;
       }
 
-      size_t num_unsent_bytes;
-      {  // Frontend updates nextToWrite... so critical section
+      {  // Frontend updates nextToWrite, so it's a critical section
         std::lock_guard<std::mutex> write_lock_guard{writeMutex};
         num_unsent_bytes = sendInfo.nextToWrite - sendInfo.nextToSend;
       }
@@ -29,6 +28,7 @@ namespace JC {
       if (num_unsent_bytes > 0) {
         TcpSocket::sendNewData(num_unsent_bytes);
       } else if (ready_to_close) {
+        LOG("Closing backend...");
         break;
       }
       TcpSocket::resendOldData();  // retransmit unACK'd data
@@ -68,7 +68,7 @@ namespace JC {
 
   void TcpSocket::sendNewData(size_t num_unsent_bytes) {
     size_t nbytes_unacked = sendInfo.nextToSend - sendInfo.lastAck;
-    size_t send_capacity = std::max(0, static_cast<int>(sendInfo.advertisedWindow - nbytes_unacked));
+    size_t send_capacity = std::max(0, static_cast<int>(sendInfo.otherSideAdvWindow - nbytes_unacked));
     size_t nbytes_to_send = std::min(send_capacity, num_unsent_bytes);
     size_t nbytes_sent{0};
     std::chrono::time_point<CLOCK> transmission_time = CLOCK::now();
@@ -82,7 +82,8 @@ namespace JC {
       size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
       uint32_t seq_num = sendInfo.nextToSend + nbytes_sent;
       std::vector<uint8_t> packet(packet_len);
-      initHeader(static_cast<JC::TcpHeader*>(packet.data()),
+      JC::TcpHeader* hdr = (JC::TcpHeader*) packet.data();
+      initHeader(hdr,
                  myPort,
                  ntohs(conn.sin_port),
                  seq_num,
@@ -92,13 +93,16 @@ namespace JC {
                  JC_TCP_ACK_FLAG,
                  recvInfo.getAdvertisedWindow(), 
                  UNUSED);
+      uint8_t* payload = packet.data() + sizeof(JC::TcpHeader);
       for (int i = 0; i < payload_size; i++) {
         size_t ofs = (sendInfo.nextToSend + nbytes_sent + i) % BUF_CAP;
-        packet[sizeof(JC::TcpHeader) + i] = sendBuf[ofs];
+        // std::cout << sendBuf[ofs];  // DEBUG
+        // std::cout << sendInfo.nextToSend + nbytes_sent + i << std::endl;
+        payload[i] = sendBuf[ofs];
       }
 
       sendto(udpSocket,
-             static_cast<void*>(packet),
+             static_cast<void*>(packet.data()),
              packet_len,
              UNUSED,             // flags
              (sockaddr*) &conn,  // dest_addr
@@ -111,38 +115,41 @@ namespace JC {
       retransmission_info.packet = std::move(packet);
       unackedPacketsInfo.push_back(retransmission_info);
     }
+    sendInfo.nextToSend += nbytes_to_send;
   }
 
-  void resendOldData() {
+  void TcpSocket::resendOldData() {
     std::chrono::time_point<CLOCK> now = CLOCK::now();
     std::list<JC::RetransmissionInfo>::iterator it = unackedPacketsInfo.begin();
     while (it != unackedPacketsInfo.end()) {
-      assert(it->packet.empty());
+      assert(!it->packet.empty());
       void* packet = static_cast<void*>(it->packet.data());
-      
+ 
       // It may have already been ACK'd
       JC::TcpHeader* hdr = static_cast<JC::TcpHeader*>(packet);
       if (hdr->seqNum < sendInfo.lastAck) {
-        unackedPacketsInfo.pop_front();
+        it = unackedPacketsInfo.erase(it);
         continue;
       }
 
       // if this packet's timer hasn't expired, subsequent packets' haven't either
       std::chrono::milliseconds elapsed_time
-        = std::chrono::duration_cast<std::chrono::milliseconds>(now - retransmission_info.transmissionTime);
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->transmissionTime);
       if (elapsed_time.count() < ACK_TIMEOUT) {
         break;
       }
 
       // Resend packet
-      hdr->ackNum = recvInfo.nextExpected;
-      hdr->advertisedWindow = recvInfo.getAdvertisedWindow();
+      hdr->ackNum = recvInfo.nextExpected;  // nextExpected changes between original transmission and retransmission
+      hdr->advertisedWindow = recvInfo.getAdvertisedWindow();  // recvBuf capacity changes
       sendto(udpSocket,
              packet,
-             packet.size(),
+             it->packet.size(),
              UNUSED,         // flags
              (sockaddr*) &conn,
              sizeof(conn));
+
+      it++;
     }
   }
 
@@ -212,10 +219,8 @@ namespace JC {
       return;
     }
 
-    // TODO: put all this into a method that returns pointer to packet
-    // optionally wait some time in case no data has been received yet
+    // wait some time in case no data has been received yet
     if (readMode == JC::ReadMode::TIMEOUT) {
-        // wait to see if data comes in
         struct pollfd pfd;
         pfd.fd = udpSocket;
         pfd.events = POLLIN;  // there is data to read
@@ -252,69 +257,71 @@ namespace JC {
       }
       assert(recvdPacket.size() == recvdHdr.packetLen);
       assert(recvdHdr.identifier == JC_TCP_IDENTIFIER);
+      // std::cout << "recvdSeqNum: " << recvdHdr.seqNum << std::endl;  // DEBUG
 
+      // Update sending/receiving info
+      assert(recvdHdr.advertisedWindow > 0);
+      sendInfo.otherSideAdvWindow = recvdHdr.advertisedWindow;
       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
-        if (sendState.lastAck > recvdHdr.ackNum) {
+        if (sendInfo.lastAck > recvdHdr.ackNum) {
           std::cerr << "ERROR receiveIncomingData:" << std::endl;
-          std::cerr << "lastAck=" << sendState.lastAck
+          std::cerr << "lastAck=" << sendInfo.lastAck
                     << " > "
                     << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
           assert(false);
           return;
         }
 
-        sendState.lastAck = recvdHdr.ackNum;
+        sendInfo.lastAck = recvdHdr.ackNum;
       }
 
-      bool arrived_in_order = recvdHdr.seqNum == recvState.nextExpected;
+      bool arrived_in_order = recvdHdr.seqNum == recvInfo.nextExpected;
       size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
       uint32_t last_seq_num = recvdHdr.seqNum + payload_len - 1;
-      if (last_seq_num - recvState.nextToRead < BUF_CAP) {
-        {
-          // save payload into recvBuf
+      if (last_seq_num - recvInfo.nextToRead < BUF_CAP) {
+        {  // save payload into recvBuf
           std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
           for (int i = 0; i < payload_len; i++) {
-            size_t idx = (recvHdr.seqNum + i) % BUF_CAP;
+            size_t idx = (recvdHdr.seqNum + i) % BUF_CAP;
+            // std::cout << recvdPacket[recvdHdr.headerLen + i];  // DEBUG
             recvBuf[idx] = recvdPacket[recvdHdr.headerLen + i];
             
             if (!arrived_in_order) {
               yetToAck[idx] = true;  // mark out-of-order bytes
             }
           }
-          recvState.lastReceived = std::max(recvState.lastReceived,
+          recvInfo.lastReceived = std::max(recvInfo.lastReceived,
                                             last_seq_num);
 
           /* nextExpected must be updated when packets arrive in order.
              NOTE: frontend uses nextExpected to know last bytes
                    available to read, it must be updated in critical section */
           if (arrived_in_order) {
-            recvState.nextExpected = recvdHdr.seqNum + payload_len;
-            while (yetToAck[recvState.nextExpected % BUF_CAP]) {
-              yetToAck[(recvState.nextExpected++) % BUF_CAP] = false;
+            recvInfo.nextExpected = recvdHdr.seqNum + payload_len;
+            while (yetToAck[recvInfo.nextExpected % BUF_CAP]) {
+              yetToAck[(recvInfo.nextExpected++) % BUF_CAP] = false;
             }
-            receivedCondVar.notify_all();  // notify TCP's frontend: new data to read
           }
         }
 
         if (arrived_in_order) {  // must send ACK
-          assert((recvdHdr.flags & JC_TCP_ACK_FLAG) == 0);
-          size_t adv_window = BUF_CAP - (recvState.lastReceived + 1 - recvState.nextToRead);
+          receivedCondVar.notify_all();  // notify TCP's frontend: new data to read
           JC::TcpHeader ackHdr{JC_TCP_IDENTIFIER,
-                               myPort,                         // srcPort
-                               ntohs(conn.sin_port),           // destPort
-                               UNUSED,                         // seqNum
-                               recvState.nextExpected,         // ackNum
-                               sizeof(JC::TcpHeader),          // headerLen
-                               sizeof(JC::TcpHeader),          // packetLen
+                               myPort,                          // srcPort
+                               ntohs(conn.sin_port),            // destPort
+                               UNUSED,                          // seqNum
+                               recvInfo.nextExpected,          // ackNum
+                               sizeof(JC::TcpHeader),           // headerLen
+                               sizeof(JC::TcpHeader),           // packetLen
                                JC_TCP_ACK_FLAG,
-                               adv_window,                     // advertisedWindow
-                               UNUSED};                        // extensionLen
+                               recvInfo.getAdvertisedWindow(),  // advertisedWindow
+                               UNUSED};                         // extensionLen
 
           /* NOTE: sendto blocks when it's send buffer is full, 
                    unless in non-blocking I/O mode.
                    So, that's why it's outside critical section */
           sendto(udpSocket,         // sockfd
-                 static_cast<void*>(&ackHeader), // buf
+                 static_cast<void*>(&ackHdr),  // buf
                  sizeof(JC::TcpHeader),        // len
                  0,                 // flags
                  (sockaddr*) &conn,  // dest_addr

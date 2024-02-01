@@ -10,13 +10,20 @@ void receiveFile() {
   JC::TcpSocket sock;
   sock.open(JC::SocketType::TCP_LISTENER, SERVER_PORT, SERVER_IP_ADDR);
 
-  char line[BUF_SIZE];
   int file_size = 0;
   while (true) {
-    int read_size = sock.read(static_cast<void*>(line), BUF_SIZE, JC::ReadMode::BLOCK);
+    char line[BUF_SIZE];
+    int read_size = sock.read(static_cast<void*>(line),
+                              BUF_SIZE,
+                              JC::ReadMode::BLOCK);
+    std::cout << "READ_SIZE " << read_size << std::endl;
+    for (int i = 0; i < read_size; i++) {
+      std::cout << line[i];
+    }
     file_size += read_size;
-    std::string line_str(line);
-    std::cout << line_str.substr(0, read_size);
+    if (file_size == 5466) {
+      break;
+    }
 
     // std::cout << "line_len " << file_size << std::endl;
   }
