@@ -5,10 +5,10 @@ set(CMAKE_CXX_COMPILER "g++-13")
 
 project(JcTcp)
 
-set(JC_TCP_SOURCES src/JcTcp.cpp
-                   src/JcTcpPacket.cpp
+set(JC_TCP_SOURCES src/JcTcpPacket.cpp
                    src/JcTcpSocket.cpp
-                   src/JcTcpSocketBackend.cpp)
+                   src/JcTcpSocketBackend.cpp
+                   src/Util.cpp)
 
 set(TARGET_CLIENT client)
 add_executable(${TARGET_CLIENT} ${JC_TCP_SOURCES} src/Client.cpp)

@@ -24,6 +24,7 @@
 
 #include "JcTcpPacket.hpp"
 #include "Config.hpp"
+#include "Util.hpp"
 
 #define JC_EXIT_SUCCESS 0
 #define JC_EXIT_FAILURE -1
@@ -33,16 +34,10 @@
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
 #define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
-#define CLOCK std::chrono::high_resolution_clock
 
 // ACK ~ receiver sets ackNum to the nextExpected seqNum
 
 namespace JC {
-  struct RetransmissionInfo {
-    std::chrono::time_point<CLOCK> transmissionTime;
-    std::vector<uint8_t> packet;
-  };
-
   struct SendInfo {
     uint32_t lastAck;      // Backend's read index
     uint32_t nextToSend;
@@ -91,6 +86,11 @@ namespace JC {
      *                with INADDR_ANY.
      *   - LISTENER: 'server_ip' and 'port' constitute the
      *               address this socket is bound to.
+     *
+     * @param socket_type Listener or initiator
+     * @param port to either connect to or bind to (depending on socket_type)
+     * @param server_ip Address to connect to (only used if socket is initiator)
+     *
      * @return 0 on success, -1 on failure
      */
     int open(const JC::SocketType socket_type,
@@ -98,10 +98,13 @@ namespace JC {
               const std::string& server_ip);
 
     /**
-     * @brief Reads data from the socket.
+     * @brief Reads data from the JC-TCP socket.
+     *
+     * Any data available in the socket buffer is placed into 'dest_buf'.
      *
      * @param dest_buf Where the data received on the socket is written to
      * @param len Max number of bytes to read.
+     * @param read_mode Indicates how to wait on data to read
      *
      * @return The number of bytes read on success, -1 on failure
      */
@@ -127,15 +130,13 @@ namespace JC {
   private:
     /*** BACKEND API ('backendThread' logic) ***/
     /**
-     * @brief JC-TCP backend main routine
+     * @brief Launches thread running JC-TCP backend main routine
      */
     void beginBackend();
 
     /**
      * Splits a stream of data into individual packets
      * and sends them one at a time.
-     *
-     * @param dataToSend Raw bytes to be transmitted over the network.
      */
     // void sendOnePacketAtATime(std::vector<uint8_t>& dataToSend);
     void sendNewData(size_t num_unsent_bytes);
@@ -156,6 +157,21 @@ namespace JC {
     std::thread backendThread;
     /*** END OF BACKEND API ***/
 
+    /* Backend constantly checks udpSocket for incoming data, and puts
+     * anything it received into receivedBuf. read() then directly
+     * retrieves data from receivedBuf */
+    std::array<uint8_t, BUF_CAP> recvBuf;
+    JC::RecvInfo recvInfo{0, 0, 0};
+    std::mutex receivedMutex;
+    std::condition_variable receivedCondVar;
+    std::array<bool, BUF_CAP> yetToAck;
+
+    /* write() puts data into sendingBuf, backend empties it and
+     * sends it via the udpSocket */
+    std::array<uint8_t, BUF_CAP> sendBuf;
+    JC::SendInfo sendInfo{0, 0, 0};
+    std::mutex writeMutex;  // synch app & JC-TCP backend when modifying sendBuf
+
     int udpSocket;
     uint16_t myPort{0};
     JC::SocketType type;
@@ -166,26 +182,13 @@ namespace JC {
      * bound to */
     sockaddr_in conn;  
 
-    /* Backend constantly checks udpSocket for incoming data, and puts
-     * anything it received into receivedBuf. read() then directly
-     * retrieves data from receivedBuf */
-    std::array<uint8_t, BUF_CAP> recvBuf;
-    std::mutex receivedMutex;
-    std::condition_variable receivedCondVar;
-    std::array<bool, BUF_CAP> yetToAck;
-
-    /* write() puts data into sendingBuf, backend empties it and
-     * sends it via the udpSocket */
-    std::array<uint8_t, BUF_CAP> sendBuf;
-    std::mutex writeMutex;  // synch app & JC-TCP backend
-
     // whether connection is ready to be closed. Only close() modifies this flag
     bool dying{false};  
     std::mutex closeMutex;
 
-    JC::SendInfo sendInfo{0, 0, 0};
-    JC::RecvInfo recvInfo{0, 0, 0};
-    std::list<JC::RetransmissionInfo> unackedPacketsInfo;
+    size_t rttEstimate{ACK_TIMEOUT};
+    size_t rttDevEstimate{ACK_TIMEOUT / 16};  // Round-Trip Time deviation
+    std::list<JC::UnackedPacketInfo> unackedPacketsInfo;
   };
 }
 

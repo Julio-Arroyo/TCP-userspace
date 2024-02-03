@@ -51,7 +51,6 @@ onPacket(pkt):
     remaining_capacity = CAPACITY - 
 '''
 
-TODO: do RTT estimation
 TODO: fixed window size
 TODO: connection teardown
 

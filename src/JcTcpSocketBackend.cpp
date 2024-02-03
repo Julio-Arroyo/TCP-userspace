@@ -96,8 +96,6 @@ namespace JC {
       uint8_t* payload = packet.data() + sizeof(JC::TcpHeader);
       for (int i = 0; i < payload_size; i++) {
         size_t ofs = (sendInfo.nextToSend + nbytes_sent + i) % BUF_CAP;
-        // std::cout << sendBuf[ofs];  // DEBUG
-        // std::cout << sendInfo.nextToSend + nbytes_sent + i << std::endl;
         payload[i] = sendBuf[ofs];
       }
 
@@ -110,20 +108,18 @@ namespace JC {
       nbytes_sent += payload_size;
 
       // record info in case packet is not ACK'd
-      JC::RetransmissionInfo retransmission_info;
-      retransmission_info.transmissionTime = transmission_time;
-      retransmission_info.packet = std::move(packet);
-      unackedPacketsInfo.push_back(retransmission_info);
+      unackedPacketsInfo.emplace_back(transmission_time, packet);
     }
     sendInfo.nextToSend += nbytes_to_send;
   }
 
   void TcpSocket::resendOldData() {
     std::chrono::time_point<CLOCK> now = CLOCK::now();
-    std::list<JC::RetransmissionInfo>::iterator it = unackedPacketsInfo.begin();
+    size_t timeout = rttEstimate + (rttDevEstimate >> 2);  // >> 2 is times 4
+
+    std::list<JC::UnackedPacketInfo>::iterator it = unackedPacketsInfo.begin();
     while (it != unackedPacketsInfo.end()) {
-      assert(!it->packet.empty());
-      void* packet = static_cast<void*>(it->packet.data());
+      void* packet = static_cast<void*>(it->getPacket());
  
       // It may have already been ACK'd
       JC::TcpHeader* hdr = static_cast<JC::TcpHeader*>(packet);
@@ -134,8 +130,8 @@ namespace JC {
 
       // if this packet's timer hasn't expired, subsequent packets' haven't either
       std::chrono::milliseconds elapsed_time
-        = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->transmissionTime);
-      if (elapsed_time.count() < ACK_TIMEOUT) {
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->getTransmissionTime());
+      if (elapsed_time.count() < timeout) {
         break;
       }
 
@@ -144,11 +140,12 @@ namespace JC {
       hdr->advertisedWindow = recvInfo.getAdvertisedWindow();  // recvBuf capacity changes
       sendto(udpSocket,
              packet,
-             it->packet.size(),
+             hdr->packetLen,
              UNUSED,         // flags
              (sockaddr*) &conn,
              sizeof(conn));
-
+      
+      it->setRetransmitted();
       it++;
     }
   }
@@ -257,7 +254,6 @@ namespace JC {
       }
       assert(recvdPacket.size() == recvdHdr.packetLen);
       assert(recvdHdr.identifier == JC_TCP_IDENTIFIER);
-      // std::cout << "recvdSeqNum: " << recvdHdr.seqNum << std::endl;  // DEBUG
 
       // Update sending/receiving info
       assert(recvdHdr.advertisedWindow > 0);
@@ -283,7 +279,6 @@ namespace JC {
           std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
           for (int i = 0; i < payload_len; i++) {
             size_t idx = (recvdHdr.seqNum + i) % BUF_CAP;
-            // std::cout << recvdPacket[recvdHdr.headerLen + i];  // DEBUG
             recvBuf[idx] = recvdPacket[recvdHdr.headerLen + i];
             
             if (!arrived_in_order) {

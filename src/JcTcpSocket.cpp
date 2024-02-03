@@ -164,7 +164,6 @@ namespace JC {
                  sizeof(conn));
           sendInfo.nextToSend = first_seq_num + 1;
           sendInfo.nextToWrite = first_seq_num + 1;
-          std::cout << "FSN + 1: " << sendInfo.nextToSend << std::endl;
           LOG("Waiting for server to accept connection request...");
 
           struct pollfd pfd;
@@ -233,7 +232,6 @@ namespace JC {
   int TcpSocket::read(void* dest_buf,
                       const int len,
                       const JC::ReadMode read_mode) {
-    std::cout << "read()" << std::endl;
     if (read_mode == JC::ReadMode::TIMEOUT) {
       std::cerr << "jc_read does not implement read_mode=TIMEOUT" << std::endl;
       return JC_EXIT_FAILURE;
@@ -250,7 +248,6 @@ namespace JC {
       while (unread_bytes == 0) {
         receivedCondVar.wait(read_unique_lock);
         unread_bytes = recvInfo.nextExpected - recvInfo.nextToRead;
-        std::cout << "unread_bytes: " << unread_bytes << std::endl;
       }
     }
 
@@ -284,9 +281,7 @@ namespace JC {
     uint8_t* src_buf_bytes = static_cast<uint8_t*>(src_buf);
     // copy data from 'src_buf' into 'sendBuf'
     for (uint32_t i = 0; i < write_len; i++) {
-      std::cout << "nomod: " << (sendInfo.nextToWrite + i) << std::endl;  // DEBUG
       sendBuf[(sendInfo.nextToWrite + i) % BUF_CAP] = src_buf_bytes[i];
-      std::cout << "mod: " << ((sendInfo.nextToWrite + i) % BUF_CAP) << std::endl;  // DEBUG
     }
     sendInfo.nextToWrite += write_len;
 

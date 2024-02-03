@@ -1,4 +1,4 @@
-#include "JcTcp.hpp"
+#include "JcTcpSocket.hpp"
 
 #include <iostream>
 #include <limits>
@@ -16,22 +16,17 @@ void receiveFile() {
     int read_size = sock.read(static_cast<void*>(line),
                               BUF_SIZE,
                               JC::ReadMode::BLOCK);
-    std::cout << "READ_SIZE " << read_size << std::endl;
     for (int i = 0; i < read_size; i++) {
       std::cout << line[i];
     }
     file_size += read_size;
-    if (file_size == 5466) {
+
+    // TODO: better stopping condition
+    if (file_size == 5766) {
       break;
     }
-
-    // std::cout << "line_len " << file_size << std::endl;
   }
-  // size_t attempts = 0;
-  // while (line_len > 0 || attempts++ < MAX_ATTEMPTS) {
-  //   std::cout << line << std::endl;
-  //   line_len = sock.read(static_cast<void*>(line), BUF_SIZE, JC::ReadMode::NO_WAIT);
-  // }
+
   sock.teardown();
 }
 
@@ -63,3 +58,4 @@ int main() {
   // receiveNumberSequence();
   return 0;
 }
+

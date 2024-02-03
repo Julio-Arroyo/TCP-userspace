@@ -1,4 +1,4 @@
-#include "JcTcp.hpp"
+#include "JcTcpSocket.hpp"
 
 #include <iostream>
 #include <string>
@@ -16,8 +16,7 @@ void transferFile(const std::string& fname) {
   buf << fileToTransfer.rdbuf();
   fileToTransfer.close();
   std::string contents = buf.str();
-  // std::cout << contents << std::endl;
-  std::cout << "contents.length() " << contents.length() << std::endl;
+  std::cout << "Transmitted file size: " << contents.length() << std::endl;
 
   JC::TcpSocket sock;
   sock.open(JC::SocketType::TCP_INITIATOR, SERVER_PORT, SERVER_IP_ADDR);
@@ -32,11 +31,6 @@ void transmitNumberSequence(const int sequence_len) {
   sock.open(JC::SocketType::TCP_INITIATOR,
             SERVER_PORT,
             SERVER_IP_ADDR);
-
-  // block so that server has time to startu up
-  // std::cout << "Type a message to send to the Server: " << std::endl;
-  // std::string msg;
-  // std::cin >> msg;
 
   char buf[sequence_len];
   char epoch = 0;
@@ -62,3 +56,4 @@ int main() {
 
   return 0;
 }
+
