@@ -38,16 +38,38 @@
 // ACK ~ receiver sets ackNum to the nextExpected seqNum
 
 namespace JC {
+
+  /**
+   * Set of seqNum's maintained by the sending side of the connection.
+   */ 
   struct SendInfo {
-    uint32_t lastAck;      // Backend's read index
+    /**
+     * - Corresponds to latest (and largest) ackNum received by the
+     *   sending side of the connection.
+     * - Serves as backend's read index into sendBuf.
+     */
+    uint32_t lastAck;
+
     uint32_t nextToSend;
-    uint32_t nextToWrite;  // Frontend's write index
+
+    /* Serves as frontend's write index into sendBuf. */
+    uint32_t nextToWrite;
+ 
+    /* Receiver side's advertised window size. */
     uint16_t otherSideAdvWindow;
   };
 
-  /* Receiver side of connection maintains a set of seqNum's */
+  /**
+   * Set of seqNum's maintained by the receiver side of the connection.
+   */ 
   struct RecvInfo {
+    /* Frontend's read index into recvBuf. */
     uint32_t nextToRead;
+
+    /**
+     * Smallest sequence number 'x' such that, for all i < x, sequence 
+     * number 'i' has already been received.
+     */
     uint32_t nextExpected;
 
     /* If packet w/ seqNum = 650 is received with payload_len = 100,
@@ -60,15 +82,16 @@ namespace JC {
       // SWP
       uint16_t num_buffered_bytes = lastReceived + 1 - nextToRead;
       assert(num_buffered_bytes <= BUF_CAP);
-      return BUF_CAP - num_buffered_bytes;  // TODO: static_cast<uint16_t>
+      return BUF_CAP - num_buffered_bytes;
     }
   };
 
   enum SocketType {
-    TCP_INITIATOR = 0,
-    TCP_LISTENER = 1
+    TCP_INITIATOR = 0,  // client
+    TCP_LISTENER = 1    // server
   };
 
+  /* Waiting policy when reading from a JC-TCP socket. */
   enum ReadMode {
     BLOCK = 0,
     NO_WAIT,
@@ -131,26 +154,34 @@ namespace JC {
     int teardown();
 
   private:
-    /*** BACKEND API ('backendThread' logic) ***/
+    /*** BACKEND THREAD FUNCTIONALITY ***/
     /**
-     * @brief Launches thread running JC-TCP backend main routine
+     * @brief Launches thread running JC-TCP backend main routine.
      */
     void beginBackend();
 
     /**
-     * Splits a stream of data into individual packets
-     * and sends them one at a time.
+     * @brief Transmits bytes that have not yet been transmitted.
+     *
+     * The data to be sent is split into individual packets, and those
+     * are transmitted while honoring the receiver side's advertised
+     * window size.
      */
-    // void sendOnePacketAtATime(std::vector<uint8_t>& dataToSend);
     void sendNewData(size_t num_unsent_bytes);
+
+    /**
+     * @brief Retransmits packets that aren't ACKed within a time window.
+     *
+     * The timeout period is computed as:
+     *   $ 1*[rttEstimate] + 4*[rttDevEstimate]
+     */
     void resendOldData();
 
     /**
      * Checks udpSocket for any incoming data. If it sees anything,
      * it puts it into receivedBuf.
      *
-     * Called after sending when waiting for ACK  // TODO fix stop-wait
-     * Called in backend tight loop
+     * Called in backend tight loop.
      *
      * @param readMode Dictates whether this call should set a timer to
      *                 wait for data, or try to read immediately.
@@ -158,18 +189,21 @@ namespace JC {
     void receiveIncomingData(const JC::ReadMode readMode);
 
     std::thread backendThread;
-    /*** END OF BACKEND API ***/
+    /*** END OF BACKEND THREAD FUNCTIONALITY ***/
 
     /* Backend constantly checks udpSocket for incoming data, and puts
-     * anything it received into receivedBuf. read() then directly
+     * anything it received into recvBuf. read() then directly
      * retrieves data from receivedBuf */
     std::array<uint8_t, BUF_CAP> recvBuf;
     JC::RecvInfo recvInfo{0, 0, 0};
     std::mutex receivedMutex;
-    std::condition_variable receivedCondVar;
+    // backend signals frontend when it puts data in recvBuf
+    std::condition_variable receivedCondVar;  
+    // Corresponds to data in recvBuf that arrived out-of-order and thus
+    // has not been ACKed.
     std::array<bool, BUF_CAP> yetToAck;
 
-    /* write() puts data into sendingBuf, backend empties it and
+    /* write() puts data into sendBuf, backend empties it and
      * sends it via the udpSocket */
     std::array<uint8_t, BUF_CAP> sendBuf;
     JC::SendInfo sendInfo{0, 0, 0};
@@ -189,8 +223,13 @@ namespace JC {
     bool dying{false};  
     std::mutex closeMutex;
 
+    /** Parameters for RTT estimation. */
     size_t rttEstimate{ACK_TIMEOUT};
     size_t rttDevEstimate{ACK_TIMEOUT / 16};  // Round-Trip Time deviation
+
+    /**
+     * Metadata used for triggering lost-packet retransmission and RTT estimation.
+     */
     std::list<JC::UnackedPacketInfo> unackedPacketsInfo;
   };
 }
