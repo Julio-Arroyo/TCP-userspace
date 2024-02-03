@@ -162,7 +162,7 @@ namespace JC {
       // *** prepare packet (header and payload) ***
       size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
       std::vector<uint8_t> packet(packet_len);
-      void* hdr = packet.data() + bytes_sent;  // TODO: i think it is wrong to add bytes_sent
+      void* hdr = packet.data() + bytes_sent;  // TODO: i think adding bytes_sent is a bug
       initHeader(static_cast<JC::TcpHeader*>(hdr),
                  myPort,                  // srcPort
                  ntohs(conn.sin_port),    // destPort
