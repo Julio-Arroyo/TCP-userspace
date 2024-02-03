@@ -51,6 +51,5 @@ onPacket(pkt):
     remaining_capacity = CAPACITY - 
 '''
 
-TODO: fixed window size
 TODO: connection teardown
 

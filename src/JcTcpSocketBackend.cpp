@@ -3,13 +3,17 @@
 namespace JC {
   /**
    * Infinitely loop until connection is torn down.
-   *   - Tear down if 'dying' has been set and there is no 
+   *   - Tear down connection if 'dying' has been set and there is no 
    *     pending data to send.
-   *   - Whenever there is data in 'sending_buf', empty it and put the data
+   *   - SENDING SIDE: Whenever there is data in 'sendBuf', empty it and put the data
    *     in individual packets and send them over the socket one at a time.
-   *   - RECEIVING END: check if there is incoming data, which may be an ACK or an actual packet
-   *     with payload. If it's the former, update sendState. If it is the latter
-   *     save the received the 
+   *   - RECEIVING SIDE:
+   *       > check if there is incoming data, which may be an ACK or an actual packet
+   *       > if received an ACK:
+   *         + update recvInfo
+   *         + re-estimate RTT (if corresponding packet was transmitted only once).
+   *       > if received packet with data in payload:
+   *         + save data in recvBuf if within advertised window.
    */
   void TcpSocket::beginBackend() {
     bool ready_to_close{false};
@@ -35,34 +39,6 @@ namespace JC {
 
       // Check if there is any data to receive
       TcpSocket::receiveIncomingData(ReadMode::NO_WAIT);
-
-      /*
-      // Transmit any data in sending_buf
-      std::vector<uint8_t> dataToSend;
-      {
-        std::lock_guard<std::mutex> write_lock_guard{writeMutex};
-
-        size_t nBytesToSend = sendingBuf.size();
-        if (nBytesToSend == 0) {
-          if (readyToClose) {
-            break;
-          }
-        } else {
-          dataToSend = std::move(sendingBuf);
-          assert(sendingBuf.size() == 0);
-        }
-      }
-
-      // NOTE: data is sent outside writeMutex critical section
-      //       so that App can call write() and put data in sending_buf
-      if (!dataToSend.empty()) {
-        TcpSocket::sendOnePacketAtATime(dataToSend);  
-      }
-      //
-      // Check if there is any data to receive
-      TcpSocket::receiveIncomingData(ReadMode::NO_WAIT);
-      */
-
     }
   }
 
@@ -99,6 +75,7 @@ namespace JC {
         payload[i] = sendBuf[ofs];
       }
 
+      // transmit packet
       sendto(udpSocket,
              static_cast<void*>(packet.data()),
              packet_len,
@@ -128,16 +105,17 @@ namespace JC {
         continue;
       }
 
-      // if this packet's timer hasn't expired, subsequent packets' haven't either
       std::chrono::milliseconds elapsed_time
         = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->getTransmissionTime());
       if (elapsed_time.count() < timeout) {
+        // if this packet's timer hasn't expired,
+        // subsequent packets' haven't either
         break;
       }
 
-      // Resend packet
-      hdr->ackNum = recvInfo.nextExpected;  // nextExpected changes between original transmission and retransmission
-      hdr->advertisedWindow = recvInfo.getAdvertisedWindow();  // recvBuf capacity changes
+      // some header fields of retransmitted packets change
+      hdr->ackNum = recvInfo.nextExpected;
+      hdr->advertisedWindow = recvInfo.getAdvertisedWindow();
       sendto(udpSocket,
              packet,
              hdr->packetLen,
@@ -145,64 +123,10 @@ namespace JC {
              (sockaddr*) &conn,
              sizeof(conn));
       
-      it->setRetransmitted();
+      it->setRetransmitted();  // retransmitted=true
       it++;
     }
   }
-
-  /*
-  void TcpSocket::sendOnePacketAtATime(std::vector<uint8_t>& dataToSend) {
-    size_t len = dataToSend.size();
-    size_t bytes_sent{0};
-
-    while (bytes_sent < len) {
-      size_t remaining_bytes = len - bytes_sent;
-      size_t payload_size = std::min(remaining_bytes, MAX_PAYLOAD_SIZE);
-
-      // *** prepare packet (header and payload) ***
-      size_t packet_len = sizeof(JC::TcpHeader) + payload_size;
-      std::vector<uint8_t> packet(packet_len);
-      void* hdr = packet.data() + bytes_sent;  // TODO: i think adding bytes_sent is a bug
-      initHeader(static_cast<JC::TcpHeader*>(hdr),
-                 myPort,                  // srcPort
-                 ntohs(conn.sin_port),    // destPort
-                 sendState.lastAck,       // seqNum
-                 recvState.nextExpected,  // ackNum
-                 sizeof(JC::TcpHeader),   // header_len
-                 packet_len,
-                 JC_TCP_ACK_FLAG,         // flags   // TODO should have ack flag: every segment reports what seqnum the sender expects next
-                 1,                       // advertised_window
-                 UNUSED);                 // extensionLen;
-      // prepare payload
-      std::copy(dataToSend.begin() + bytes_sent,
-                dataToSend.begin() + bytes_sent + payload_size,
-                packet.data() + bytes_sent + sizeof(JC::TcpHeader));
-
-      for (;;) {
-        // send one packet (i.e send 'packet_len' bytes starting at 'hdr')
-        sendto(udpSocket,          // sockfd
-               hdr,                // buf
-               packet_len,         // len
-               0,                  // flags
-               (sockaddr*) &conn,  // dest_addr
-               sizeof(conn));      // addrlen
-        sendState.lastSent += payload_size;
- 
-        // wait for ACK
-        TcpSocket::receiveIncomingData(ReadMode::TIMEOUT);
-
-        if (sendState.lastAck == sendState.lastSent) {
-          // packet has been ACKed, send next 
-          break;
-        } else {
-          sendState.lastSent -= payload_size;
-        }
-      }
-
-      bytes_sent += payload_size;
-    }
-  }
-  */
 
   /**
    * First extract packet. Then payload
@@ -212,7 +136,7 @@ namespace JC {
    */
   void TcpSocket::receiveIncomingData(const JC::ReadMode readMode) {
     if (readMode == JC::ReadMode::BLOCK) {
-      std::cerr << "Backend should not block indefinitely to receive data." << std::endl;
+      ERROR("Backend should not block indefinitely to received data.");
       return;
     }
 
@@ -254,16 +178,18 @@ namespace JC {
       }
       assert(recvdPacket.size() == recvdHdr.packetLen);
       assert(recvdHdr.identifier == JC_TCP_IDENTIFIER);
-
-      // Update sending/receiving info
       assert(recvdHdr.advertisedWindow > 0);
+
+      // Update sending info
       sendInfo.otherSideAdvWindow = recvdHdr.advertisedWindow;
       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
         if (sendInfo.lastAck > recvdHdr.ackNum) {
-          std::cerr << "ERROR receiveIncomingData:" << std::endl;
-          std::cerr << "lastAck=" << sendInfo.lastAck
-                    << " > "
-                    << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
+          std::stringstream ss;
+          ss << "receiveIncomingData:" << std::endl;
+          ss << "\tlastAck=" << sendInfo.lastAck
+                           << " > "
+                           << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
+          ERROR(ss.str());
           assert(false);
           return;
         }
@@ -275,7 +201,8 @@ namespace JC {
       size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
       uint32_t last_seq_num = recvdHdr.seqNum + payload_len - 1;
       if (last_seq_num - recvInfo.nextToRead < BUF_CAP) {
-        {  // save payload into recvBuf
+        {  // begin critical section
+          // save payload into recvBuf
           std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
           for (int i = 0; i < payload_len; i++) {
             size_t idx = (recvdHdr.seqNum + i) % BUF_CAP;
@@ -288,16 +215,16 @@ namespace JC {
           recvInfo.lastReceived = std::max(recvInfo.lastReceived,
                                             last_seq_num);
 
-          /* nextExpected must be updated when packets arrive in order.
-             NOTE: frontend uses nextExpected to know last bytes
+          /* NOTE: frontend uses nextExpected to know last bytes
                    available to read, it must be updated in critical section */
           if (arrived_in_order) {
+            // nextExpected must be updated when packets arrive in order.
             recvInfo.nextExpected = recvdHdr.seqNum + payload_len;
             while (yetToAck[recvInfo.nextExpected % BUF_CAP]) {
               yetToAck[(recvInfo.nextExpected++) % BUF_CAP] = false;
             }
           }
-        }
+        }  // end critical section
 
         if (arrived_in_order) {  // must send ACK
           receivedCondVar.notify_all();  // notify TCP's frontend: new data to read

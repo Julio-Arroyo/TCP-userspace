@@ -9,10 +9,11 @@
 #include <algorithm>     // std::copy, std::min
 #include <unistd.h>      // close
 #include <iostream>
+#include <sstream>       // std::stringstream
 #include <utility>       // std::move
 #include <cstdint>
 #include <cstdlib>       // std::rand
-#include <cstring>       // std::memset
+#include <cstring>       // std::memset, strerror
 #include <cassert>       // assert()
 #include <poll.h>        // poll
 #include <string>
@@ -34,6 +35,7 @@
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
 #define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
+#define ERROR(msg) std::cerr << "[ERROR] " << msg << std::endl
 
 // ACK ~ receiver sets ackNum to the nextExpected seqNum
 
@@ -166,6 +168,9 @@ namespace JC {
      * The data to be sent is split into individual packets, and those
      * are transmitted while honoring the receiver side's advertised
      * window size.
+     *
+     * @param num_unsent_bytes Size of data that has not been transmitted
+     *                         at all.
      */
     void sendNewData(size_t num_unsent_bytes);
 

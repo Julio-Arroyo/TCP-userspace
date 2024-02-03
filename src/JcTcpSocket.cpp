@@ -14,11 +14,11 @@ namespace JC {
     type = socket_type;
 
     // create a UDP socket
-    int sockfd = socket(AF_INET,     // domain
-                        SOCK_DGRAM,  // type
-                        0);          // protocol
+    int sockfd = socket(AF_INET,     /* domain */
+                        SOCK_DGRAM,  /* type */
+                        0);          /* protocol */
     if (sockfd == -1) {
-      assert(false);
+      ERROR("Could not create UDP socket.");
       return  JC_EXIT_FAILURE;
     }
     udpSocket = sockfd;
@@ -38,7 +38,7 @@ namespace JC {
                    (const void*) &optval,  // non-zero ==> enable option
                    sizeof(optval));
         if (-1 == bind(udpSocket, (sockaddr*) &conn_, sizeof(conn_))) {
-          assert(false);
+          ERROR("Listener JC-TCP socket could not bind underlying udpSocket");
           return JC_EXIT_FAILURE;
         }
         conn = conn_;
@@ -64,11 +64,12 @@ namespace JC {
                 (JC_TCP_SYN_FLAG & initiationRequest.flags)) {
               recvInfo.nextExpected = initiationRequest.seqNum + 1;
               recvInfo.nextToRead = initiationRequest.seqNum + 1;
-              std::cout << "Server next to read: " << recvInfo.nextToRead << std::endl;
               recvInfo.lastReceived = initiationRequest.seqNum;
               sendInfo.otherSideAdvWindow = initiationRequest.advertisedWindow;
+ 
               // assert(sendInfo.otherSideAdvWindow == BUF_CAP);  // SWP
               assert(sendInfo.otherSideAdvWindow == FIXED_WINDOW);
+
               LOG("Received client connection request...");
               break;
             }
@@ -88,33 +89,14 @@ namespace JC {
                    JC_TCP_SYN_FLAG | JC_TCP_ACK_FLAG,
                    recvInfo.getAdvertisedWindow(),   // advertisedWindow
                    UNUSED);  // extensionLen
-        for (;;) {  // TODO: remove useless infinite loop
-          sendto(udpSocket,
-                 static_cast<void*>(&initiationResponse),
-                 sizeof(JC::TcpHeader),
-                 0,
-                 (sockaddr*) (&conn),
-                 sizeof(conn));
-          sendInfo.nextToSend = first_seq_num + 1;
-          sendInfo.nextToWrite = first_seq_num + 1;
-          break;
-
-          //// wait for Ack
-          //JC::TcpHeader confirmationAck;
-          //int bytes_confi = recvfrom(udpSocket,
-          //                           (void*) &initiationRequest,
-          //                           sizeof(JC::TcpHeader),
-          //                           0,
-          //                           (sockaddr*) &conn,
-          //                           &conn_len);
-          //if (bytes_confi == sizeof(JC::TcpHeader) &&
-          //    (confirmationAck.flags & JC_TCP_ACK_FLAG) &&
-          //    (confirmationAck.ackNum == first_seq_num + 1)) {
-          //  std::cout << "Three-way handshake successfully completed."
-          //            << std::endl;
-          //  break;
-          //}
-        }
+        sendto(udpSocket,
+               static_cast<void*>(&initiationResponse),
+               sizeof(JC::TcpHeader),
+               0,
+               (sockaddr*) (&conn),
+               sizeof(conn));
+        sendInfo.nextToSend = first_seq_num + 1;
+        sendInfo.nextToWrite = first_seq_num + 1;
         break;
       }
       case JC::SocketType::TCP_INITIATOR: {
@@ -133,7 +115,7 @@ namespace JC {
         my_addr.sin_port = 0;
         my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         if (-1 == bind(udpSocket, (sockaddr*) &my_addr, sizeof(my_addr))) {
-          assert(false);
+          ERROR("Initiator JC-TCP socket could not bind underlying udpSocket");
           return JC_EXIT_FAILURE;
         }
         conn = conn_;
@@ -192,10 +174,11 @@ namespace JC {
               recvInfo.nextToRead = server_response.seqNum + 1;
               recvInfo.lastReceived = server_response.seqNum;
               sendInfo.otherSideAdvWindow = server_response.advertisedWindow;
+
               // assert(sendInfo.otherSideAdvWindow == BUF_CAP);  // SWP
               assert(sendInfo.otherSideAdvWindow == FIXED_WINDOW);
 
-              // acknowledge server's acceptance
+              // send ACK of server's acceptance
               JC::TcpHeader acceptance_ack;
               initHeader(&acceptance_ack,
                          myPort,
@@ -219,12 +202,18 @@ namespace JC {
         }
         break;  // from switch                            
       }
+      default: {
+        ERROR("Socket type must be either listener or initiator.");
+        return JC_EXIT_FAILURE;
+        break;
+      }
     }
 
     assert(myPort != 0);
     assert(sendInfo.nextToSend == sendInfo.nextToWrite);
     assert(recvInfo.lastReceived + 1 == recvInfo.nextToRead);
     assert(recvInfo.nextToRead == recvInfo.nextExpected);
+
     LOG("Launching backend...");
     backendThread = std::thread(&TcpSocket::beginBackend, this);
 
@@ -235,10 +224,10 @@ namespace JC {
                       const int len,
                       const JC::ReadMode read_mode) {
     if (read_mode == JC::ReadMode::TIMEOUT) {
-      std::cerr << "jc_read does not implement read_mode=TIMEOUT" << std::endl;
+      ERROR("read() only supports 'read_mode' BLOCK or NO_WAIT.");
       return JC_EXIT_FAILURE;
     } else if (len < 0) {
-      std::cerr << "Cannot read negative no. of bytes" << std::endl;
+      ERROR("read() can only read non-negative number of bytes");
       return JC_EXIT_FAILURE;
     }
 
@@ -257,7 +246,6 @@ namespace JC {
     size_t read_len = std::min(static_cast<size_t>(len), unread_bytes);
     uint8_t* dest_buf_bytes = static_cast<uint8_t*>(dest_buf);
     for (int i = 0; i < read_len; i++) {
-      // std::cout << recvBuf[(recvInfo.nextToRead + i) % BUF_CAP];
       dest_buf_bytes[i] = recvBuf[(recvInfo.nextToRead + i) % BUF_CAP];
     }
     recvInfo.nextToRead += read_len;
@@ -274,7 +262,7 @@ namespace JC {
    */
   int TcpSocket::write(void* src_buf, const int write_len) {
     if (write_len < 0) {
-      std::cerr << "Cannot write '" << write_len << "' bytes. 'write_len' must must be non-negative." << std::endl; 
+      ERROR("write() cannot transmit a negative number of bytes.");
       return JC_EXIT_FAILURE;
     }
 
