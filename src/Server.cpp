@@ -22,7 +22,7 @@ void receiveFile() {
     file_size += read_size;
 
     // TODO: better stopping condition
-    if (file_size == 5766) {
+    if (file_size == 5807) {
       break;
     }
   }

@@ -2,6 +2,7 @@
 #define JC_TCP_CONFIG_HPP
 
 #define MAX_PACKET_LEN 1400
+#define FIXED_WINDOW (2 * MAX_PACKET_LEN)
 #define BUF_CAP (MAX_PACKET_LEN * 10)  // capacity of sendBuf and recvBuf
 
 #define ACK_TIMEOUT 3000

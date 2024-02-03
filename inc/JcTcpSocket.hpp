@@ -55,6 +55,9 @@ namespace JC {
     uint32_t lastReceived;
 
     uint16_t getAdvertisedWindow() {
+      return FIXED_WINDOW;
+
+      // SWP
       uint16_t num_buffered_bytes = lastReceived + 1 - nextToRead;
       assert(num_buffered_bytes <= BUF_CAP);
       return BUF_CAP - num_buffered_bytes;  // TODO: static_cast<uint16_t>

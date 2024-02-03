@@ -67,7 +67,8 @@ namespace JC {
               std::cout << "Server next to read: " << recvInfo.nextToRead << std::endl;
               recvInfo.lastReceived = initiationRequest.seqNum;
               sendInfo.otherSideAdvWindow = initiationRequest.advertisedWindow;
-              assert(sendInfo.otherSideAdvWindow == BUF_CAP);
+              // assert(sendInfo.otherSideAdvWindow == BUF_CAP);  // SWP
+              assert(sendInfo.otherSideAdvWindow == FIXED_WINDOW);
               LOG("Received client connection request...");
               break;
             }
@@ -142,7 +143,6 @@ namespace JC {
         myPort = ntohs(my_addr.sin_port);
 
         // *** Begin three-way handshake ***
-        // Repeatedly request to initiate connection, until client accepts
         uint32_t first_seq_num = std::rand();
         JC::TcpHeader connectionRequest;
         initHeader(&connectionRequest,
@@ -153,8 +153,9 @@ namespace JC {
                    sizeof(JC::TcpHeader),
                    sizeof(JC::TcpHeader),
                    JC_TCP_SYN_FLAG,
-                   BUF_CAP,   // advertisedWindow
+                   FIXED_WINDOW,  // SWP: BUF_CAP,   // advertisedWindow
                    UNUSED);  // extensionLen
+        // Repeatedly request to initiate connection, until server accepts
         for (;;) {
           sendto(udpSocket,
                  static_cast<void*>(&connectionRequest),
@@ -191,7 +192,8 @@ namespace JC {
               recvInfo.nextToRead = server_response.seqNum + 1;
               recvInfo.lastReceived = server_response.seqNum;
               sendInfo.otherSideAdvWindow = server_response.advertisedWindow;
-              assert(sendInfo.otherSideAdvWindow == BUF_CAP);
+              // assert(sendInfo.otherSideAdvWindow == BUF_CAP);  // SWP
+              assert(sendInfo.otherSideAdvWindow == FIXED_WINDOW);
 
               // acknowledge server's acceptance
               JC::TcpHeader acceptance_ack;
