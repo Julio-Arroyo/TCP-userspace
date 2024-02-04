@@ -21,10 +21,14 @@ void receiveFile() {
     }
     file_size += read_size;
 
-    // TODO: better stopping condition
-    if (file_size == 7115) {
+    if (read_size == 0) {
       break;
     }
+
+    // // TODO: better stopping condition
+    // if (file_size == 7115) {
+    //   break;
+    // }
   }
 
   sock.teardown();

@@ -32,7 +32,22 @@ namespace JC {
       if (num_unsent_bytes > 0) {
         TcpSocket::sendNewData(num_unsent_bytes);
       } else if (ready_to_close) {
-        LOG("Closing backend...");
+        if (type == JC::SocketType::TCP_INITIATOR) {
+          // Initiator requested connection to send data
+          // ==> should notify Listener when there is no more data to send
+          JC::TcpHeader finSegment{JC_TCP_IDENTIFIER,
+                                   myPort, ntohs(conn.sin_port),   /* src_port, dest_port */
+                                   UNUSED, recvInfo.nextExpected,  /* seqNum, ackNum */
+                                   sizeof(JC::TcpHeader),          /* headerLen */ 
+                                   sizeof(JC::TcpHeader),          /* packetLen */
+                                   JC_TCP_FIN_FLAG,
+                                   recvInfo.getAdvertisedWindow(),
+                                   UNUSED};                        /* extensionLen */
+          sendto(udpSocket, static_cast<void*>(&finSegment),  /* file des, buf */
+                 sizeof(JC::TcpHeader), UNUSED,               /* len, flags */
+                 (sockaddr*) &conn, sizeof(conn));             /* dest_addr, dest_len */
+        }
+        // LOG("Closing backend...");
         break;
       }
       TcpSocket::resendOldData();  // retransmit unACK'd data
@@ -187,14 +202,20 @@ namespace JC {
           std::stringstream ss;
           ss << "receiveIncomingData:" << std::endl;
           ss << "\tlastAck=" << sendInfo.lastAck
-                           << " > "
-                           << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
+                             << " > "
+                             << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
           ERROR(ss.str());
           assert(false);
           return;
         }
 
         sendInfo.lastAck = recvdHdr.ackNum;
+      }
+      if ((recvdHdr.flags & JC_TCP_FIN_FLAG) &&
+          type == JC::SocketType::TCP_LISTENER) {
+        std::lock_guard<std::mutex> close_lock_guard(closeMutex);
+        dying = true;  // initiator has no more data to send, so close listener side too
+        receivedCondVar.notify_all();  // wake up frontend so that it sees it is dying
       }
 
       bool arrived_in_order = recvdHdr.seqNum == recvInfo.nextExpected;
@@ -232,7 +253,7 @@ namespace JC {
                                myPort,                          // srcPort
                                ntohs(conn.sin_port),            // destPort
                                UNUSED,                          // seqNum
-                               recvInfo.nextExpected,          // ackNum
+                               recvInfo.nextExpected,           // ackNum
                                sizeof(JC::TcpHeader),           // headerLen
                                sizeof(JC::TcpHeader),           // packetLen
                                JC_TCP_ACK_FLAG,

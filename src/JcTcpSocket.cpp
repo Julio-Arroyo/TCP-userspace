@@ -231,14 +231,27 @@ namespace JC {
       return JC_EXIT_FAILURE;
     }
 
+    bool other_side_closed = false;
+    if (type == JC::SocketType::TCP_LISTENER) {
+      // INITIATOR may be done sending data
+      std::lock_guard<std::mutex> close_lock_guard(closeMutex);
+      other_side_closed = dying;
+    }
+
     std::unique_lock<std::mutex> read_unique_lock(receivedMutex);  // acquire lock
 
     // Block until there is data to read
     size_t unread_bytes = recvInfo.nextExpected - recvInfo.nextToRead;
+    if (unread_bytes == 0 && other_side_closed) {
+      return 0;
+    }
+
     if (read_mode == JC::ReadMode::BLOCK) {
-      while (unread_bytes == 0) {
+      while (unread_bytes == 0 && !other_side_closed) {
         receivedCondVar.wait(read_unique_lock);
         unread_bytes = recvInfo.nextExpected - recvInfo.nextToRead;
+        std::lock_guard<std::mutex> close_lock_guard(closeMutex);
+        other_side_closed = dying;
       }
     }
 
