@@ -11,10 +11,10 @@ set(JC_TCP_SOURCES src/JcTcpPacket.cpp
                    src/Util.cpp)
 
 set(TARGET_CLIENT client)
-add_executable(${TARGET_CLIENT} ${JC_TCP_SOURCES} src/Client.cpp)
+add_executable(${TARGET_CLIENT} ${JC_TCP_SOURCES} experiments/Client.cpp)
 target_include_directories(${TARGET_CLIENT} PRIVATE "./inc")
 
 set(TARGET_SERVER server)
-add_executable(${TARGET_SERVER} ${JC_TCP_SOURCES} src/Server.cpp)
+add_executable(${TARGET_SERVER} ${JC_TCP_SOURCES} experiments/Server.cpp)
 target_include_directories(${TARGET_SERVER} PRIVATE "./inc")
 
