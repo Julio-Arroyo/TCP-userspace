@@ -8,10 +8,12 @@
 #define ACK_TIMEOUT 3000
 
 #define LOOPBACK_ADDR "127.0.0.1"
+#define PRIVATE_NETWORK_ADDR "10.0.1.1"
 
 // Server-Client configs
-#define SERVER_IP_ADDR LOOPBACK_ADDR
-#define SERVER_PORT 2345  // arbitrary
+// #define SERVER_IP_ADDR LOOPBACK_ADDR
+#define SERVER_IP_ADDR PRIVATE_NETWORK_ADDR
+#define SERVER_PORT 69420  // arbitrary
 
 #endif  // JC_TCP_CONFIG_HPP
 

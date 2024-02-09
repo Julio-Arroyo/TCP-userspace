@@ -51,5 +51,3 @@ onPacket(pkt):
     remaining_capacity = CAPACITY - 
 '''
 
-TODO: connection teardown
-
