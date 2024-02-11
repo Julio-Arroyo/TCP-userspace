@@ -24,7 +24,7 @@ if __name__ == "__main__":
     try:
         size_str = sys.argv[1]
         size_bytes = parse_size(size_str)
-        filename = f'file_{size_str}.txt'
+        filename = f'files/file_{size_str}.txt'
     except ValueError as e:
         print(e)
         sys.exit(1)
