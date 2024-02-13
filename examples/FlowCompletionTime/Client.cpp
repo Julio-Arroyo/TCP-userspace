@@ -13,9 +13,10 @@ int main(int argc, char* argv[]) {
   }
   
   std::string file_size{argv[1]};
-  std::ifstream f{"../examples/FlowCompletionTime/files/file_" + file_size + ".txt"};
+  std::string fname = "./files/file_" + file_size + ".txt";
+  std::ifstream f{fname};
   if (!f.is_open()) {
-    std::cerr << "Could not open file." << std::endl;
+    std::cerr << "Could not open file " << fname << std::endl;
     return -1;
   }
 

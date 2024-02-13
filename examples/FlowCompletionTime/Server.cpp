@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <string>
 #include <ctime>
 
 #define BUF_SIZE 2048
@@ -11,9 +12,10 @@ int main() {
   sock.open(JC::SocketType::TCP_LISTENER,
             SERVER_PORT, SERVER_IP_ADDR);
   
-  std::ofstream f{"../examples/FlowCompletionTime/output/received_file.txt"};
+  std::string fname = "./output/received_file.txt";
+  std::ofstream f{fname};
   if (!f.is_open()) {
-    std::cerr << "Could not create output file."
+    std::cerr << "Could not create output file." << fname
               << std::endl;
   }
 
