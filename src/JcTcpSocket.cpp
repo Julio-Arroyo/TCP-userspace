@@ -301,5 +301,33 @@ namespace JC {
 
     return close(udpSocket);
   }
+
+  void TcpSocket::transmitData(void* buf, int nbytes,
+                               uint32_t seq_num, uint32_t ack_num,
+                               uint8_t tcp_flags, int sendto_flags) {
+    uint16_t packet_len = sizeof(JC::TcpHeader) + nbytes;
+    JC::TcpHeader hdr{JC_TCP_IDENTIFIER,
+                      myPort,                          // srcPort
+                      ntohs(conn.sin_port),            // destPort
+                      seq_num,                         // seqNum
+                      ack_num,                         // ackNum
+                      sizeof(JC::TcpHeader),           // headerLen
+                      packet_len,                      // packetLen
+                      tcp_flags,
+                      recvInfo.getAdvertisedWindow(),  // advertisedWindow
+                      UNUSED};                         // extensionLen
+
+    // TODO: add payload
+
+    /* NOTE: sendto blocks when it's send buffer is full, 
+             unless in non-blocking I/O mode.
+             So, that's why it's outside critical section */
+    sendto(udpSocket,         // sockfd
+           static_cast<void*>(&hdr),  // buf
+           packet_len,     // len
+           0,                 // flags
+           (sockaddr*) &conn,  // dest_addr
+           sizeof(conn));     // addrlen
+  }
 }
 

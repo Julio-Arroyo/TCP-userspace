@@ -35,7 +35,8 @@
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_LEN - sizeof(JC::TcpHeader))
 
 #define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
-#define ERROR(msg) std::cerr << "[ERROR] " << msg << std::endl
+#define ERROR(msg) std::cerr << "[ERROR]: " << msg << std::endl
+#define DEBUG(msg) std::cout << "[DEBUG]: " << msg << std::endl
 
 // ACK ~ receiver sets ackNum to the nextExpected seqNum
 
@@ -156,6 +157,10 @@ namespace JC {
     int teardown();
 
   private:
+    void transmitData(void* buf, int nbytes,
+                      uint32_t seq_num, uint32_t ack_num,
+                      uint8_t tcp_flags, int sendto_flags);
+
     /*** BACKEND THREAD FUNCTIONALITY ***/
     /**
      * @brief Launches thread running JC-TCP backend main routine.
@@ -195,6 +200,7 @@ namespace JC {
 
     std::thread backendThread;
     /*** END OF BACKEND THREAD FUNCTIONALITY ***/
+
 
     /* Backend constantly checks udpSocket for incoming data, and puts
      * anything it received into recvBuf. read() then directly

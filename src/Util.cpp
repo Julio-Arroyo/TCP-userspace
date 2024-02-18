@@ -16,8 +16,9 @@ std::chrono::time_point<CLOCK> JC::UnackedPacketInfo::getTransmissionTime() {
   return transmissionTime;
 }
 
-void JC::UnackedPacketInfo::setRetransmitted() {
+void JC::UnackedPacketInfo::setRetransmitted(std::chrono::time_point<CLOCK> retransmission_time) {
   retransmitted = true;
+  transmissionTime = retransmission_time;
 }
 
 bool JC::UnackedPacketInfo::getRetransmitted() {
