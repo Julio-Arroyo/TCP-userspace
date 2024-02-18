@@ -20,6 +20,7 @@ if __name__ == "__main__":
 
     plt.xlabel("File size (bytes)")
     plt.ylabel("Flow completion time (ms)")
+    plt.title("Time to transmit file w/ 10Mbps & 20ms delay at different loss rates")
     plt.legend()
-    plt.show()
+    plt.savefig("results.png")
 

@@ -37,6 +37,9 @@ underlying UDP socket to see if the other side of the connection has sent
 any data. If so, it buffers it in 'recvBuf' and signals the **frontend**
 there is data available to read as long as the data arrived in-order.
 
+## Experiments
+![fct-plot](https://github.com/Julio-Arroyo/TCP-userspace/blob/main/examples/FlowCompletionTime/results.png?raw=true)
+
 ## Philosophy
 - Easy to read code, comments explaining literally what it does.
 - Conceptual explanations of what each component does.
