@@ -17,9 +17,13 @@ namespace JC {
   class UnackedPacketInfo {
   public:
     UnackedPacketInfo(std::chrono::time_point<CLOCK> transmission_time, std::vector<uint8_t>& pkt);
+
     uint8_t* getPacket();
+
     std::chrono::time_point<CLOCK> getTransmissionTime();
+
     void setRetransmitted(std::chrono::time_point<CLOCK> retransmission_time);
+
     bool getRetransmitted();
 
   private:

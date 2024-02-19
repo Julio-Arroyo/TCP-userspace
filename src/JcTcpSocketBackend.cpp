@@ -116,6 +116,7 @@ namespace JC {
       // It may have already been ACK'd
       JC::TcpHeader* hdr = static_cast<JC::TcpHeader*>(packet);
       if (hdr->seqNum < sendInfo.lastAck) {
+        assert(hdr->seqNum + (hdr->packetLen - 1 - hdr->headerLen) < sendInfo.lastAck);
         it = unackedPacketsInfo.erase(it);
         continue;
       }
@@ -132,10 +133,6 @@ namespace JC {
       hdr->ackNum = recvInfo.nextExpected;
       hdr->advertisedWindow = recvInfo.getAdvertisedWindow();
 
-      std::stringstream ss;
-      ss << "Retransmitted seqNum " << hdr->seqNum;
-      LOG(ss.str());
-
       sendto(udpSocket,
              packet,
              hdr->packetLen,
@@ -147,146 +144,6 @@ namespace JC {
       it++;
     }
   }
-
-   /**
-   * First extract packet. Then payload
-   *
-   * Case TIMEOUT:
-   *   - Used when sending one packet, wait for receipt of ACK
-   *
-   * GOAL: buffer packet into recvBuf, update recvInfo TODO
-   */
-//   void TcpSocket::receiveIncomingData(const JC::ReadMode readMode) {
-//     if (readMode == JC::ReadMode::BLOCK) {
-//       ERROR("Backend should not block indefinitely to received data.");
-//       return;
-//     }
-// 
-//     // wait some time in case no data has been received yet
-//     if (readMode == JC::ReadMode::TIMEOUT) {
-//         struct pollfd pfd;
-//         pfd.fd = udpSocket;
-//         pfd.events = POLLIN;  // there is data to read
-//         poll(&pfd, 1 /* num pollfd's */, ACK_TIMEOUT /* ms */);
-//     } else {
-//       assert(readMode == JC::ReadMode::NO_WAIT);
-//     }
-// 
-//     // peek to see if there's at least a header's worth of data
-//     JC::TcpHeader recvdHdr;
-//     socklen_t conn_len = sizeof(conn);
-//     int flags = MSG_DONTWAIT |  /* make nonblocking call */
-//                 MSG_PEEK;       /* next recvfrom() call returns same data) */
-//     int minBytesAvl = recvfrom(udpSocket,
-//                                (void*) &recvdHdr,       /* buf */
-//                                sizeof(JC::TcpHeader),   /* len */
-//                                flags,
-//                                (sockaddr*) &conn,       /* src_addr */
-//                                &conn_len);              /* addrlen */
-// 
-//     // TODO: break if condition fails instead
-//     if (minBytesAvl >= static_cast<int>(sizeof(JC::TcpHeader))) {  // >= 1 pkt worth of data
-//       // extract the entire packet (header + payload) from socket
-//       size_t nBytesRecvd{0};
-//       std::vector<uint8_t> recvdPacket(recvdHdr.packetLen);
-// 
-//       // loop until all 'packet_len' bytes are extracted from the socket
-//       while (nBytesRecvd < recvdHdr.packetLen) {
-//         nBytesRecvd += recvfrom(udpSocket,
-//                                 static_cast<void*>(recvdPacket.data() + nBytesRecvd),
-//                                 recvdHdr.packetLen - nBytesRecvd,
-//                                 UNUSED,  // flags
-//                                 (sockaddr*) &conn,
-//                                 &conn_len);
-//       }
-//       assert(recvdPacket.size() == recvdHdr.packetLen);
-//       assert(recvdHdr.identifier == JC_TCP_IDENTIFIER);
-//       assert(recvdHdr.advertisedWindow > 0);
-// 
-//       // Update sending info
-//       sendInfo.otherSideAdvWindow = recvdHdr.advertisedWindow;
-//       if (recvdHdr.flags & JC_TCP_ACK_FLAG) {
-//         if (sendInfo.lastAck > recvdHdr.ackNum) {
-//           std::stringstream ss;
-//           ss << "receiveIncomingData:" << std::endl;
-//           ss << "\tlastAck=" << sendInfo.lastAck
-//                              << " > "
-//                              << recvdHdr.ackNum << "=recvdAckNum" << std::endl;
-//           ERROR(ss.str());
-//           assert(false);
-//           return;
-//         }
-// 
-//         sendInfo.lastAck = recvdHdr.ackNum;
-//       }
-//       if ((recvdHdr.flags & JC_TCP_FIN_FLAG) &&
-//           type == JC::SocketType::TCP_LISTENER) {
-//         std::lock_guard<std::mutex> close_lock_guard(closeMutex);
-//         dying = true;  // initiator has no more data to send, so close listener side too
-//         receivedCondVar.notify_all();  // wake up frontend so that it sees it is dying
-//       }
-// 
-//       bool arrived_in_order = recvdHdr.seqNum == recvInfo.nextExpected;
-//       size_t payload_len = recvdHdr.packetLen - recvdHdr.headerLen;
-//       uint32_t last_seq_num = recvdHdr.seqNum + payload_len - 1;
-//       if (last_seq_num - recvInfo.nextToRead < BUF_CAP) {  // TODO: break if no capacity
-//         {  // begin critical section
-//           // save payload into recvBuf
-//           std::lock_guard<std::mutex> received_lock_guard{receivedMutex};
-//           for (int i = 0; i < payload_len; i++) {
-//             size_t idx = (recvdHdr.seqNum + i) % BUF_CAP;
-//             recvBuf[idx] = recvdPacket[recvdHdr.headerLen + i];
-//             
-//             if (!arrived_in_order) {
-//               yetToAck[idx] = true;  // mark out-of-order bytes
-//             }
-//           }
-//           recvInfo.lastReceived = std::max(recvInfo.lastReceived,
-//                                             last_seq_num);
-// 
-//           /* NOTE: frontend uses nextExpected to know last bytes
-//                    available to read, it must be updated in critical section */
-//           if (arrived_in_order) {
-//             // nextExpected must be updated when packets arrive in order.
-//             recvInfo.nextExpected = recvdHdr.seqNum + payload_len;
-//             while (yetToAck[recvInfo.nextExpected % BUF_CAP]) {
-//               yetToAck[(recvInfo.nextExpected++) % BUF_CAP] = false;
-//               if (recvdHdr.seqNum < recvInfo.nextExpected && recvdHdr.seqNum != 0) {
-//                 std::stringstream ss;
-//                 ss << "seqNum = " << recvdHdr.seqNum << " < " << recvInfo.nextExpected << " = nextExpected" << std::endl;
-//                 DEBUG(ss.str());
-//                 assert(false);
-//               }
-//             }
-//           }
-//         }  // end critical section
-// 
-//         if (arrived_in_order) {  // must send ACK
-//           receivedCondVar.notify_all();  // notify TCP's frontend: new data to read
-//           JC::TcpHeader ackHdr{JC_TCP_IDENTIFIER,
-//                                myPort,                          // srcPort
-//                                ntohs(conn.sin_port),            // destPort
-//                                UNUSED,                          // seqNum
-//                                recvInfo.nextExpected,           // ackNum
-//                                sizeof(JC::TcpHeader),           // headerLen
-//                                sizeof(JC::TcpHeader),           // packetLen
-//                                JC_TCP_ACK_FLAG,
-//                                recvInfo.getAdvertisedWindow(),  // advertisedWindow
-//                                UNUSED};                         // extensionLen
-// 
-//           /* NOTE: sendto blocks when it's send buffer is full, 
-//                    unless in non-blocking I/O mode.
-//                    So, that's why it's outside critical section */
-//           sendto(udpSocket,         // sockfd
-//                  static_cast<void*>(&ackHdr),  // buf
-//                  sizeof(JC::TcpHeader),        // len
-//                  0,                 // flags
-//                  (sockaddr*) &conn,  // dest_addr
-//                  sizeof(conn));     // addrlen
-//         }
-//       }
-//     }
-//   }
 
   void TcpSocket::receiveIncomingData(const JC::ReadMode read_mode) {
     if (read_mode != JC::ReadMode::TIMEOUT &&
@@ -342,16 +199,44 @@ namespace JC {
     if (recvd_hdr.flags & JC_TCP_ACK_FLAG) {
       assert(sendInfo.lastAck <= recvd_hdr.ackNum);
       sendInfo.lastAck = recvd_hdr.ackNum;
+
+      // update rttEstimate
+      std::list<JC::UnackedPacketInfo>::iterator it = unackedPacketsInfo.begin();
+      while (it != unackedPacketsInfo.end()) {
+        if (!it->getRetransmitted()) {
+          JC::TcpHeader* curr_hdr = (JC::TcpHeader*) (it->getPacket());
+          uint16_t curr_payload_len = curr_hdr->packetLen - curr_hdr->headerLen;
+
+          if (curr_hdr->seqNum + curr_payload_len == recvd_hdr.ackNum) {
+            std::chrono::time_point<CLOCK> now = CLOCK::now();
+            std::chrono::milliseconds rtt_measured 
+              = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->getTransmissionTime());
+            std::stringstream ss;
+            ss << "Measured: " << rtt_measured.count() << ". Updating RTT parameters: " << rttEstimate << "," << rttDevEstimate;
+            updateEstimatesRTT(rtt_measured.count(), rttEstimate, rttDevEstimate);
+            ss << " to (" << rttEstimate << "," << rttDevEstimate << ")";
+            DEBUG(ss.str());
+            break;
+          }
+        }
+        it++;
+      }
     }
 
-    bool arrived_in_order = recvd_hdr.seqNum == recvInfo.nextExpected;
     size_t payload_len = recvd_hdr.packetLen - recvd_hdr.headerLen;
     uint32_t last_seq_num = recvd_hdr.seqNum + payload_len - 1;
+    /* Ignore payload-carrying packets that have already been received */
+    if (recvd_hdr.seqNum != 0 && recvd_hdr.seqNum < recvInfo.nextExpected) {
+      // assert starting and ending seqNum's in packet do NOT straddle lastAck
+      assert(last_seq_num < recvInfo.nextExpected);  
+      return;
+    }
     if (recvd_hdr.seqNum > recvInfo.lastReceived &&
         (last_seq_num - recvInfo.nextToRead) >= BUF_CAP) {
       LOG("Out of capacity");
       return;
     }
+    bool arrived_in_order = recvd_hdr.seqNum == recvInfo.nextExpected;
 
     {  // begin critical section: write to recvBuf
       std::lock_guard<std::mutex> recv_lock_guard{receivedMutex};
@@ -360,6 +245,7 @@ namespace JC {
         recvBuf[idx] = recvd_packet[recvd_hdr.headerLen + i];
 
         if (!arrived_in_order) {
+          assert(recvd_hdr.seqNum > recvInfo.nextExpected);
           /* this doesn't need to happen in critical section but
            * no point in looping again afterwards */
           yetToAck[idx] = true;
